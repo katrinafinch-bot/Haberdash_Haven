@@ -19,23 +19,6 @@ const COLOR_FAMILY_KEYS = [
   "Greys & Blacks","Specialty & Variegated"
 ];
 
-// All available Home quick actions. key, label, emoji, color class, and where it goes.
-// dest: {tab} or {tab:"more", sub:"..."} ; needsAuth gates guest users.
-const QUICK_ACTION_CATALOG = [
-  {key:"match",      label:"Match",      emoji:"🔍", cls:"gold",  dest:{tab:"match"},                 needsAuth:false},
-  {key:"stash",      label:"My Stash",   emoji:"◈",  cls:"teal",  dest:{tab:"stash"},                 needsAuth:true},
-  {key:"shopping",   label:"Shopping",   emoji:"🛒", cls:"amber", dest:{tab:"stash"},                 needsAuth:true},
-  {key:"machines",   label:"Machines",   emoji:"⚙️", cls:"ocean", dest:{tab:"more",sub:"machines"},   needsAuth:true},
-  {key:"accuquilt",  label:"AccuQuilt",  emoji:"◈",  cls:"amber", dest:{tab:"more",sub:"accuquilt"},  needsAuth:true},
-  {key:"feet",       label:"Feet",       emoji:"👟", cls:"ocean", dest:{tab:"more",sub:"feet"},       needsAuth:true},
-  {key:"rulers",     label:"Rulers",     emoji:"📐", cls:"green", dest:{tab:"more",sub:"rulers"},     needsAuth:true},
-  {key:"projects",   label:"Projects",   emoji:"◉",  cls:"green", dest:{tab:"projects"},              needsAuth:true},
-  {key:"forum",      label:"Forum",      emoji:"💬", cls:"navy",  dest:{tab:"more",sub:"forum"},      needsAuth:true},
-  {key:"settings",   label:"Settings",   emoji:"⚙",  cls:"navy",  dest:{tab:"more",sub:"settings"},   needsAuth:true},
-];
-const DEFAULT_QUICK_ACTIONS = ["match","stash","shopping","projects"];
-
-
 const threadBrands = [
   ["Isacord","isacord"],
   ["Aurifil","aurifil"],
@@ -181,29 +164,6 @@ function findNearestInPool(hexOrObj, pool){
     if(d<bestDist){ bestDist=d; best=item; }
   }
   return best;
-}
-
-// Sort comparator: groups visually-similar colors together (hue, then lightness, then saturation).
-function colorSortKey(item){
-  const rgb = item.r!=null ? {r:item.r,g:item.g,b:item.b} : hexToRgb(item.hex_color);
-  if(!rgb) return [999,999,999];
-  const {r,g,b}=rgb;
-  const max=Math.max(r,g,b),min=Math.min(r,g,b),chroma=max-min;
-  const l=(max+min)/2;
-  let h=0;
-  if(chroma!==0){
-    if(max===r) h=((g-b)/chroma+6)%6;
-    else if(max===g) h=(b-r)/chroma+2;
-    else h=(r-g)/chroma+4;
-    h*=60;
-  }
-  // Neutrals (low chroma) sorted to the end, ordered by lightness
-  const hueBucket = chroma<20 ? 1000 : h;
-  return [hueBucket, l, -chroma];
-}
-function byColor(a,b){
-  const ka=colorSortKey(a), kb=colorSortKey(b);
-  return ka[0]-kb[0] || ka[1]-kb[1] || ka[2]-kb[2];
 }
 
 // Always returns an ENGLISH key from COLOR_FAMILY_KEYS — never a translated string
@@ -451,10 +411,7 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
   const planPremium = userPlan === "premium";
   const [activeSection, setActiveSection] = useState("threads");
   const [stash, setStash] = useState({threads:[],fabrics:[],rulers:[],machines:[],dies:[],feet:[],accessories:[]});
-  const [counts, setCounts] = useState({threads:0,fabrics:0,rulers:0,machines:0,dies:0,feet:0,accessories:0,shopping:0});
-  const [fabricShop, setFabricShop] = useState([]);
-  const [customShop, setCustomShop] = useState([]);
-  const [customForm, setCustomForm] = useState({item:"",qty:"",notes:""});
+  const [counts, setCounts] = useState({threads:0,fabrics:0,rulers:0,machines:0,dies:0,feet:0,accessories:0});
   const [loading, setLoading] = useState(true);
   const [showReport, setShowReport] = useState(false);
   // Accessories state
@@ -465,26 +422,22 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
     if(!supabase||!userId)return;
     setLoading(true);
     try{
-      const [{data:th},{data:fa},{data:ru},{data:ma},{data:di},{data:fe},{data:fsh},{data:csh}] = await Promise.all([
+      const [{data:th},{data:fa},{data:ru},{data:ma},{data:di},{data:fe}] = await Promise.all([
         supabase.from("user_inventory").select("spool_count,thread_library(id,brand,brand_key,color_code,color_name,hex_color,fiber_type,weight)").eq("user_id",userId),
         supabase.from("user_fabric_inventory").select("id,notes,fabric_library(id,brand,color_code,color_name,hex_color,family,nearest_kona_name)").eq("user_id",userId),
         supabase.from("user_rulers").select("quantity,ruler_library(brand,name,category,size,sku)").eq("user_id",userId),
         supabase.from("user_machines").select("machine_id,serial_number,purchase_date,purchase_price,dealer,warranty_until,user_notes,machine_library(id,brand,model,type,category,throat_space,fun_fact,is_computerized)").eq("user_id",userId),
         supabase.from("user_dies").select("quantity,accuquilt_library(id,product_name,product_type)").eq("user_id",userId),
         supabase.from("user_feet").select("quantity,feet_library(brand,foot_name,category,shank_type)").eq("user_id",userId),
-        supabase.from("fabric_shopping_list").select("id,name,brand,color_code,hex_color,notes").eq("user_id",userId),
-        supabase.from("shopping_custom").select("id,item,qty,notes").eq("user_id",userId).order("created_at"),
       ]);
       // Accessories — stored in localStorage for now
       const savedAcc = JSON.parse(localStorage.getItem("hh_accessories")||"[]");
       const s={threads:th||[],fabrics:fa||[],rulers:ru||[],machines:ma||[],dies:di||[],feet:fe||[],accessories:savedAcc};
       setStash(s);
-      setFabricShop(fsh||[]);
-      setCustomShop(csh||[]);
-      setCounts({threads:s.threads.length,fabrics:s.fabrics.length,rulers:s.rulers.length,machines:s.machines.length,dies:s.dies.length,feet:s.feet.length,accessories:s.accessories.length,shopping:(mergedShoppingList?.length||0)+((fsh||[]).length)+((csh||[]).length)});
+      setCounts({threads:s.threads.length,fabrics:s.fabrics.length,rulers:s.rulers.length,machines:s.machines.length,dies:s.dies.length,feet:s.feet.length,accessories:s.accessories.length});
     }catch(e){console.error("Stash fetch:",e);}
     setLoading(false);
-  },[supabase,userId,mergedShoppingList]);
+  },[supabase,userId]);
 
   useEffect(()=>{ fetchAll(); },[fetchAll]);
 
@@ -506,49 +459,6 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
     setCounts(c=>({...c,accessories:updated.length}));
   }
 
-  async function addCustomShoppingItem(){
-    if(!customForm.item.trim()||!supabase||!userId)return;
-    const{data,error}=await supabase.from("shopping_custom")
-      .insert({user_id:userId,item:customForm.item.trim(),qty:customForm.qty.trim()||null,notes:customForm.notes.trim()||null})
-      .select().maybeSingle();
-    if(error){ console.error("custom shop:",error.message); return; }
-    setCustomShop(prev=>[...prev,data]);
-    setCounts(c=>({...c,shopping:(c.shopping||0)+1}));
-    setCustomForm({item:"",qty:"",notes:""});
-  }
-  async function removeCustomShoppingItem(id){
-    if(!supabase)return;
-    await supabase.from("shopping_custom").delete().eq("id",id);
-    setCustomShop(prev=>prev.filter(x=>x.id!==id));
-    setCounts(c=>({...c,shopping:Math.max(0,(c.shopping||1)-1)}));
-  }
-  function printShoppingList(){
-    const esc=s=>String(s||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
-    const row=(sw,main,sub)=>`<tr><td style="width:34px">${sw?`<span style="display:inline-block;width:22px;height:22px;border-radius:4px;border:1px solid #999;background:${esc(sw)}"></span>`:""}</td><td><b>${esc(main)}</b>${sub?`<div style="font-size:11px;color:#666">${esc(sub)}</div>`:""}</td></tr>`;
-    let body="";
-    if(mergedShoppingList.length){ body+=`<h2>Threads</h2><table>`; mergedShoppingList.forEach(i=>{ body+=row(i.hex_color,`${i.brand||""} ${i.code||""} — ${i.name||""}`.trim(),[i.fiber_type,i.weight,i.qty?`Qty ${i.qty}`:""].filter(Boolean).join(" · ")); }); body+=`</table>`; }
-    if(fabricShop.length){ body+=`<h2>Fabrics</h2><table>`; fabricShop.forEach(i=>{ body+=row(i.hex_color,`${i.brand||""} ${i.color_code||""} ${i.name||""}`.trim(),i.notes); }); body+=`</table>`; }
-    if(customShop.length){ body+=`<h2>Other Items</h2><table>`; customShop.forEach(i=>{ body+=row(null,i.item,[i.qty?`Qty ${i.qty}`:"",i.notes].filter(Boolean).join(" · ")); }); body+=`</table>`; }
-    if(!body) body="<p>Your shopping list is empty.</p>";
-    const html=`<!doctype html><html><head><title>Shopping List — Haberdash Haven</title><style>
-      body{font-family:Georgia,serif;color:#1C2B2B;max-width:640px;margin:30px auto;padding:0 20px}
-      h1{color:#0D5252;border-bottom:2px solid #E8A800;padding-bottom:8px}
-      h2{color:#0D5252;font-size:15px;margin:20px 0 6px;text-transform:uppercase;letter-spacing:.5px}
-      table{width:100%;border-collapse:collapse} td{padding:6px 8px;border-bottom:1px solid #eee;vertical-align:middle;font-size:13px}
-      .foot{margin-top:30px;font-size:11px;color:#999;text-align:center}
-      @media print{body{margin:0}}
-    </style></head><body>
-      <h1>🛒 Shopping List</h1>
-      <div style="font-size:12px;color:#666">Haberdash Haven · ${new Date().toLocaleDateString()}</div>
-      ${body}
-      <div class="foot">Generated by Haberdash Haven — Stitch. Match. Thrive.</div>
-    </body></html>`;
-    const w=window.open("","_blank");
-    if(!w){ alert("Please allow pop-ups to print your shopping list."); return; }
-    w.document.write(html); w.document.close();
-    w.onload=()=>{ w.focus(); w.print(); };
-  }
-
   const catColors={
     Quilting:{bg:"#E8F0FF",text:"#0047AB"},Garment:{bg:"#E0F5EC",text:"#1A6B4A"},
     Embroidery:{bg:"#F3EAF8",text:"#6B3FA0"},Serging:{bg:"#FFF8E1",text:"#5C4A1E"},
@@ -563,7 +473,6 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
     {key:"dies",label:"AccuQuilt",emoji:"◈",minPlan:"premium"},
     {key:"feet",label:"Feet",emoji:"👟",minPlan:"premium"},
     {key:"accessories",label:"Accessories",emoji:"✦",minPlan:"premium"},
-    {key:"shopping",label:"Shopping",emoji:"🛒",minPlan:"basic"},
   ];
   const sections = allSections.filter(s => {
     if(s.minPlan === "free") return true;
@@ -688,76 +597,6 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
               </div>
             ))}
           </>
-        )
-      )}
-
-      {/* ── SHOPPING ── */}
-      {activeSection==="shopping"&&(
-        !planBasic ? (
-          <div className="card" style={{textAlign:"center",padding:"24px"}}>
-            <div style={{fontSize:28,marginBottom:8}}>🛒</div>
-            <div style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:700,color:"var(--teal)",marginBottom:8}}>Shopping List is a Basic feature</div>
-            <p className="muted" style={{fontSize:13,marginBottom:12}}>Upgrade to Basic to manage your shopping list.</p>
-            <button className="btn active" onClick={()=>window.location.href=window.location.origin}>Upgrade to Basic — $4.99/mo</button>
-          </div>
-        ) : (
-          <div className="card">
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-              <h2 style={{margin:0}}>Shopping List</h2>
-              <button className="btn" onClick={printShoppingList}>🖨 Print / Save PDF</button>
-            </div>
-
-            {/* Manual add */}
-            <div style={{marginTop:12,padding:"10px 12px",background:"var(--teal-pale)",border:"1px solid var(--border-teal)",borderRadius:"var(--r-sm)"}}>
-              <div style={{fontSize:12,fontWeight:700,color:"var(--teal)",marginBottom:6}}>Add an item</div>
-              <input className="input" placeholder="Item (e.g. backing fabric, batting…)" value={customForm.item} onChange={e=>setCustomForm({...customForm,item:e.target.value})} style={{marginBottom:6}}/>
-              <div style={{display:"flex",gap:6}}>
-                <input className="input" placeholder="Qty (optional)" value={customForm.qty} onChange={e=>setCustomForm({...customForm,qty:e.target.value})} style={{flex:"0 0 110px"}}/>
-                <input className="input" placeholder="Notes (optional)" value={customForm.notes} onChange={e=>setCustomForm({...customForm,notes:e.target.value})} style={{flex:1}}/>
-              </div>
-              <button className="btn active" disabled={!customForm.item.trim()} onClick={addCustomShoppingItem} style={{marginTop:8}}>+ Add to List</button>
-            </div>
-
-            {(mergedShoppingList.length===0 && fabricShop.length===0 && customShop.length===0)
-              ?<p className="muted" style={{marginTop:12}}>Your shopping list is empty. Add threads or fabrics from the Match tab, or add an item above.</p>
-              :<div style={{marginTop:12}}>
-                {mergedShoppingList.length>0&&<div style={{fontSize:11,fontWeight:700,color:"var(--teal)",textTransform:"uppercase",letterSpacing:".5px",margin:"4px 0 8px"}}>Threads</div>}
-                {mergedShoppingList.map(item=>(
-                  <div key={item.id} className="sub-card" style={{display:"flex",alignItems:"flex-start",gap:10}}>
-                    {item.hex_color&&<div style={{width:36,height:36,borderRadius:"50%",flexShrink:0,background:item.hex_color,border:"2px solid rgba(255,255,255,0.6)"}}/>}
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontWeight:700,fontSize:13}}>{item.brand&&`${item.brand} `}{item.code} — {item.name}</div>
-                      {item.fiber_type&&<div className="muted" style={{fontSize:11}}>{item.fiber_type} {item.weight}</div>}
-                      <div className="muted" style={{fontSize:11}}>Qty: {item.qty}</div>
-                    </div>
-                    <button className="btn" style={{fontSize:11,padding:"4px 8px",color:"#C0392B",borderColor:"#C0392B",flexShrink:0}} onClick={()=>removeShoppingItem(item.id)}>✕</button>
-                  </div>
-                ))}
-                {fabricShop.length>0&&<div style={{fontSize:11,fontWeight:700,color:"var(--sun-amber)",textTransform:"uppercase",letterSpacing:".5px",margin:"12px 0 8px"}}>Fabrics</div>}
-                {fabricShop.map(item=>(
-                  <div key={item.id} className="sub-card" style={{display:"flex",alignItems:"flex-start",gap:10}}>
-                    {item.hex_color&&<div style={{width:36,height:36,borderRadius:6,flexShrink:0,background:item.hex_color,border:"2px solid rgba(255,255,255,0.6)"}}/>}
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontWeight:700,fontSize:13}}>{item.brand&&`${item.brand} `}{item.color_code&&`${item.color_code} — `}{item.name}</div>
-                      {item.notes&&<div className="muted" style={{fontSize:11}}>{item.notes}</div>}
-                    </div>
-                    <button className="btn" style={{fontSize:11,padding:"4px 8px",color:"#C0392B",borderColor:"#C0392B",flexShrink:0}}
-                      onClick={async()=>{ if(supabase){ await supabase.from("fabric_shopping_list").delete().eq("id",item.id); setFabricShop(prev=>prev.filter(x=>x.id!==item.id)); setCounts(c=>({...c,shopping:Math.max(0,(c.shopping||1)-1)})); } }}>✕</button>
-                  </div>
-                ))}
-                {customShop.length>0&&<div style={{fontSize:11,fontWeight:700,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px",margin:"12px 0 8px"}}>Other Items</div>}
-                {customShop.map(item=>(
-                  <div key={item.id} className="sub-card" style={{display:"flex",alignItems:"flex-start",gap:10}}>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontWeight:700,fontSize:13}}>{item.item}</div>
-                      {(item.qty||item.notes)&&<div className="muted" style={{fontSize:11}}>{[item.qty?`Qty ${item.qty}`:"",item.notes].filter(Boolean).join(" · ")}</div>}
-                    </div>
-                    <button className="btn" style={{fontSize:11,padding:"4px 8px",color:"#C0392B",borderColor:"#C0392B",flexShrink:0}} onClick={()=>removeCustomShoppingItem(item.id)}>✕</button>
-                  </div>
-                ))}
-              </div>
-            }
-          </div>
         )
       )}
 
@@ -2054,45 +1893,6 @@ function UpgradePrompt({ requiredPlan, feature, currentPlan, isGuest }) {
 // ─────────────────────────────────────────────────────────────
 // ColorWheelTab — Color harmony explorer with thread matching
 // ─────────────────────────────────────────────────────────────
-// Custom RGB color picker — full control on mobile (native input shows only ~8 swatches on iOS/Android)
-function ColorPicker({ value, onChange }) {
-  const rgb = hexToRgb(value) || { r: 42, g: 127, b: 127 };
-  const toHex = x => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, "0");
-  const setChannel = (ch, v) => {
-    const next = { ...rgb, [ch]: Number(v) };
-    onChange("#" + toHex(next.r) + toHex(next.g) + toHex(next.b));
-  };
-  const channels = [["r", "R", "#e44"], ["g", "G", "#2a2"], ["b", "B", "#36f"]];
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%", maxWidth: 320 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ width: 48, height: 48, borderRadius: 8, flexShrink: 0, background: value, border: "2px solid rgba(255,255,255,0.5)", boxShadow: "0 2px 8px rgba(0,0,0,0.15)" }} />
-        <input
-          type="text"
-          value={value.toUpperCase()}
-          onChange={e => {
-            let v = e.target.value.trim();
-            if (!v.startsWith("#")) v = "#" + v;
-            if (/^#[0-9a-fA-F]{6}$/.test(v)) onChange(v);
-          }}
-          style={{ fontFamily: "monospace", fontSize: 14, fontWeight: 700, color: "var(--teal)", width: 100, padding: "8px 10px", borderRadius: 8, border: "1.5px solid var(--border-teal)", background: "var(--warm-white)" }}
-        />
-      </div>
-      {channels.map(([ch, label, col]) => (
-        <div key={ch} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: col, width: 14 }}>{label}</span>
-          <input
-            type="range" min="0" max="255" value={rgb[ch]}
-            onChange={e => setChannel(ch, e.target.value)}
-            style={{ flex: 1, accentColor: col }}
-          />
-          <span style={{ fontFamily: "monospace", fontSize: 12, color: "var(--muted)", width: 30, textAlign: "right" }}>{rgb[ch]}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function ColorWheelTab({ supaAllThreads, supaFabrics=[], userId, supabase, addToUserInventory, addFabricToInventory, addManualShoppingItem }) {
   const [stashThreads, setStashThreads] = useState([]);
 
@@ -2216,9 +2016,10 @@ function ColorWheelTab({ supaAllThreads, supaFabrics=[], userId, supabase, addTo
         const tRgb = t.r != null ? { r: t.r, g: t.g, b: t.b } : hexToRgb(t.hex_color);
         return { thread: t, dist: colorDistance(rgb, tRgb) };
       })
+      .filter(m => m.dist <= 20)
       .sort((a, b) => a.dist - b.dist)
       .slice(0, 3)
-      .map(m => ({ ...m.thread, _dist: m.dist }));
+      .map(m => m.thread);
   }
 
   function findFabricMatches(hex, pool) {
@@ -2230,9 +2031,10 @@ function ColorWheelTab({ supaAllThreads, supaFabrics=[], userId, supabase, addTo
         const fRgb = f.r != null ? { r: f.r, g: f.g, b: f.b } : hexToRgb(f.hex_color);
         return { fabric: f, dist: colorDistance(rgb, fRgb) };
       })
+      .filter(m => m.dist <= 25)
       .sort((a, b) => a.dist - b.dist)
       .slice(0, 3)
-      .map(m => ({ ...m.fabric, _dist: m.dist }));
+      .map(m => m.fabric);
   }
 
   useEffect(() => {
@@ -2262,7 +2064,17 @@ function ColorWheelTab({ supaAllThreads, supaFabrics=[], userId, supabase, addTo
         <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
           <div>
             <label style={{ fontSize: 12, color: "var(--muted)", display: "block", marginBottom: 4 }}>Base Color</label>
-            <ColorPicker value={baseHex} onChange={setBaseHex} />
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <input
+                type="color"
+                value={baseHex}
+                onChange={e => setBaseHex(e.target.value)}
+                style={{ width: 48, height: 48, border: "none", borderRadius: 8, cursor: "pointer", padding: 2 }}
+              />
+              <span style={{ fontFamily: "monospace", fontSize: 14, color: "var(--teal)", fontWeight: 700 }}>
+                {baseHex.toUpperCase()}
+              </span>
+            </div>
           </div>
           <div style={{ flex: 1, minWidth: 140 }}>
             <label style={{ fontSize: 12, color: "var(--muted)", display: "block", marginBottom: 4 }}>Match From</label>
@@ -2343,7 +2155,7 @@ function ColorWheelTab({ supaAllThreads, supaFabrics=[], userId, supabase, addTo
               </div>
               {colorEntry.threads.length === 0 && (
                 <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--muted)", fontStyle: "italic" }}>
-                  {source === "stash" ? "No threads in your stash yet" : "No threads loaded"}
+                  No thread match within range
                 </span>
               )}
             </div>
@@ -3501,11 +3313,9 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
   const [supaAllThreads, setSupaAllThreads] = useState([]); // unified thread_library — all brands
   const [supaFabrics, setSupaFabrics] = useState([]); // fabric_library — all solids
   const [fabricStash, setFabricStash] = useState([]); // user_fabric_inventory rows (with joined fabric)
-  const fabricBrandList = useMemo(()=>[...new Set(supaFabrics.map(f=>f.brand).filter(Boolean))].sort(),[supaFabrics]);
-  const [fabricBrandFilter, setFabricBrandFilter] = useState("All");
   const [form, setForm]               = useState(emptyForm);
   const [message, setMessage]         = useState("");
-  const [settings, setSettings]       = useState(()=>{ const saved=localStorage.getItem("hh_settings"); const base={showBarcodes:true,showWeights:true,autoAddZeroInventoryToShoppingList:true,defaultMatchMode:"thread",defaultBrand:"Isacord",crossRefBrand:"",showValuesInReports:false,quickActions:DEFAULT_QUICK_ACTIONS}; return saved?{...base,...JSON.parse(saved)}:base; });
+  const [settings, setSettings]       = useState(()=>{ const saved=localStorage.getItem("hh_settings"); return saved?JSON.parse(saved):{showBarcodes:true,showWeights:true,autoAddZeroInventoryToShoppingList:true,defaultMatchMode:"thread",defaultBrand:"Isacord",crossRefBrand:"",showValuesInReports:false}; });
   const [syncMeta, setSyncMeta]       = useState({ appVersion:APP_VERSION,libraryVersion:"1.0.0",remoteLibraryVersion:"1.0.0",status:"Ready",lastSynced:"Never",hasUpdate:false });
   const [lang, setLang]               = useState(()=>localStorage.getItem("hh_lang")||"en-US");
   useEffect(()=>{localStorage.setItem("hh_lang",lang);},[lang]);
@@ -3521,7 +3331,6 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
   const [cameraSample, setCameraSample]       = useState(null);
   const [pendingBarcode, setPendingBarcode]   = useState(null);
   const [showAddThread, setShowAddThread]     = useState(false);
-  const [editQuickActions, setEditQuickActions] = useState(false);
 
   // Shopping / projects
   const [shoppingList, setShoppingList]                   = useState([]);
@@ -3644,20 +3453,18 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
     const hasQuery  = q.length > 0;
 
     // Require at least a color family OR a search query
-    // (fabric: a brand filter alone also qualifies)
-    if(!hasFilter && !hasQuery && !(subTab==="fabric" && fabricBrandFilter!=="All")) return [];
+    if(!hasFilter && !hasQuery) return [];
 
     // Fabric search — queries real fabric_library (parity with thread search)
     if(subTab==="fabric"){
       let res=[...supaFabrics];
-      if(fabricBrandFilter!=="All") res=res.filter(f=>f.brand===fabricBrandFilter);
       if(hasFilter) res=res.filter(f=>hexToFamilyKey(f)===colorFamilyKey);
       if(hasQuery) res=res.filter(f=>
         normalized(f.color_name).includes(q)||normalized(f.color_code).includes(q)||
         normalized(f.brand).includes(q)||normalized(f.family).includes(q)||
         normalized(f.nearest_kona_name).includes(q)
       );
-      return res.sort(byColor).slice(0,120);
+      return res.sort((a,b)=>String(a.color_name||"").localeCompare(String(b.color_name||""))).slice(0,80);
     }
 
     // Thread search — use thread_library_all if available, else local fallback
@@ -3698,7 +3505,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
         return true;
       });
 
-      results.sort(byColor);
+      results.sort((a,b)=>a.color_name.localeCompare(b.color_name));
       // Guest restrictions: Isacord only, 10 results max
       if(!user || isGuest){
         results = results.filter(t=>t.brand_key==="isacord");
@@ -3723,7 +3530,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
     });
     results.sort((a,b)=>(a.name||"").localeCompare(b.name||""));
     return results.slice(0,100);
-  },[supaAllThreads,supaFabrics,threads,matchQuery,subTab,matchBrand,colorFamilyKey,fabricBrandFilter,user,isGuest]);
+  },[supaAllThreads,supaFabrics,threads,matchQuery,subTab,matchBrand,colorFamilyKey,user,isGuest]);
 
   const cameraMatches = useMemo(()=>{
     if(!cameraSample)return[];
@@ -3837,24 +3644,9 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
     const y=Math.max(0,Math.min(rect.height-1,event.clientY-rect.top));
     const px=Math.floor((x/rect.width)*img.naturalWidth);
     const py=Math.floor((y/rect.height)*img.naturalHeight);
-    // Average a box around the tap to kill JPEG noise / stray pixels on prints & solids.
-    // Box scales with image size (~3% of width), clamped 5–41px, odd.
-    let box=Math.round(img.naturalWidth*0.03);
-    box=Math.max(5,Math.min(41,box)); if(box%2===0)box++;
-    const half=(box-1)/2;
-    const sx=Math.max(0,px-half), sy=Math.max(0,py-half);
-    const sw=Math.min(img.naturalWidth-sx,box), sh=Math.min(img.naturalHeight-sy,box);
-    const region=ctx.getImageData(sx,sy,sw,sh).data;
-    let rSum=0,gSum=0,bSum=0,n=0;
-    for(let i=0;i<region.length;i+=4){
-      if(region[i+3]<128)continue; // skip transparent
-      rSum+=region[i];gSum+=region[i+1];bSum+=region[i+2];n++;
-    }
-    if(!n){const d=ctx.getImageData(px,py,1,1).data;rSum=d[0];gSum=d[1];bSum=d[2];n=1;}
-    const r=Math.round(rSum/n),g=Math.round(gSum/n),b=Math.round(bSum/n);
-    const hex=`#${[r,g,b].map(v=>v.toString(16).padStart(2,"0")).join("").toUpperCase()}`;
-    // marker stored as % of displayed image so it survives layout/resizes
-    setCameraSample({hex,r,g,b,markerX:(x/rect.width)*100,markerY:(y/rect.height)*100});
+    const data=ctx.getImageData(px,py,1,1).data;
+    const hex=`#${[data[0],data[1],data[2]].map(v=>v.toString(16).padStart(2,"0")).join("").toUpperCase()}`;
+    setCameraSample({hex,r:data[0],g:data[1],b:data[2]});
   };
   const handleCameraMatchWithBarcode=useCallback(async thread=>{
     if(pendingBarcode&&supabase&&userId){
@@ -4113,12 +3905,6 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
   const FabricMatchCard=({fabric})=>{
     const hex=fabric.hex_color||(fabric.r!=null?`#${[fabric.r,fabric.g,fabric.b].map(v=>v.toString(16).padStart(2,'0')).join('')}`:"#CCCCCC");
     const nearestThread=React.useMemo(()=>findNearestInPool(fabric,supaAllThreads),[fabric]);
-    const [xrefBrand,setXrefBrand]=React.useState("");
-    const xrefFabric=React.useMemo(()=>{
-      if(!xrefBrand) return null;
-      const pool=supaFabrics.filter(f=>f.brand===xrefBrand && f.id!==fabric.id);
-      return findNearestInPool(fabric,pool);
-    },[xrefBrand,fabric]);
     return(
       <div className="card">
         <div className="thread-row">
@@ -4132,8 +3918,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
           <div><b>Color family:</b> {hexToFamilyKey(fabric)}</div>
           {fabric.nearest_kona_name&&<div><b>Nearest Kona:</b> {fabric.nearest_kona_name}</div>}
         </div>
-
-        {/* Cross-ref 1: nearest matching thread */}
+        {/* Cross-reference: nearest matching thread */}
         {nearestThread&&(
           <div style={{marginTop:10,padding:"10px 12px",background:"var(--sun-wash)",border:"1.5px solid var(--border-sun)",borderRadius:"var(--r-sm)"}}>
             <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -4147,32 +3932,6 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
             </div>
           </div>
         )}
-
-        {/* Cross-ref 2: find equivalent in another fabric brand */}
-        {fabricBrandList.length>1&&(
-          <div style={{marginTop:10,padding:"10px 12px",background:"var(--teal-pale)",border:"1.5px solid var(--border-teal)",borderRadius:"var(--r-sm)"}}>
-            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-              <span style={{fontSize:12,fontWeight:700,color:"var(--teal)",whiteSpace:"nowrap"}}>Find equivalent in:</span>
-              <select value={xrefBrand} onChange={e=>setXrefBrand(e.target.value)}
-                style={{flex:1,minWidth:140,padding:"5px 10px",border:"1.5px solid var(--border-teal)",borderRadius:"var(--r-sm)",background:"var(--warm-white)",fontFamily:"Nunito,sans-serif",fontSize:13,fontWeight:600,color:"var(--ink)",cursor:"pointer",outline:"none"}}>
-                <option value="">— choose a fabric brand —</option>
-                {fabricBrandList.filter(b=>b!==fabric.brand).map(b=><option key={b} value={b}>{b}</option>)}
-              </select>
-            </div>
-            {xrefBrand&&xrefFabric&&(
-              <div style={{display:"flex",alignItems:"center",gap:10,marginTop:8,padding:"8px 10px",background:"var(--warm-white)",border:"1.5px solid var(--border-teal)",borderRadius:"var(--r-sm)"}}>
-                <div style={{width:28,height:28,borderRadius:"50%",flexShrink:0,background:xrefFabric.hex_color||"#ccc",border:"2px solid rgba(255,255,255,0.6)"}}/>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontWeight:700,fontSize:13,color:"var(--ink)"}}>{xrefFabric.color_code?`${xrefFabric.color_code} — `:""}{xrefFabric.color_name}</div>
-                  <div style={{fontSize:11,color:"var(--muted)"}}>{xrefFabric.brand}</div>
-                </div>
-                <button className="btn active" style={{fontSize:11,padding:"5px 10px",flexShrink:0}} onClick={()=>addFabricToInventory(xrefFabric)}>+ Add</button>
-              </div>
-            )}
-            {xrefBrand&&!xrefFabric&&<p style={{fontSize:12,color:"var(--muted)",marginTop:8}}>No {xrefBrand} colors loaded.</p>}
-          </div>
-        )}
-
         <div className="button-row">
           <button className="btn active" onClick={()=>addFabricToInventory(fabric)}>+ Add to Stash</button>
           <button className="btn" onClick={()=>addProjectRequiredFabric(fabric)}>Add to Project</button>
@@ -4366,74 +4125,22 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
       {tab==="home"&&(
         <div>
           <div className="card">
-            <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,fontWeight:800,color:"var(--teal)",marginBottom:6}}>
-              Welcome to Haberdash Haven
+            <div className="stats-grid">
+              <div className="stat-box"><div className="stat-num">{lowStockCount}</div><div className="stat-label">Low Stock</div></div>
+              <div className="stat-box"><div className="stat-num">{belowTargetCount}</div><div className="stat-label">Below Target</div></div>
+              <div className="stat-box"><div className="stat-num">{mergedShoppingList.length}</div><div className="stat-label">Shopping List</div></div>
             </div>
-            <div style={{fontFamily:"'Caveat',cursive",fontSize:18,color:"var(--sun-amber)",marginBottom:10}}>
-              Stitch. Match. Thrive.
-            </div>
-            <p style={{fontSize:14,lineHeight:1.55,color:"var(--ink-soft)",margin:0}}>
-              Haberdash Haven is your sewing room in your pocket — the app that knows your supplies.
-              Match thread and fabric colors instantly, track everything you own across threads, fabrics,
-              machines, rulers, AccuQuilt dies, and presser feet, plan projects, and build smart shopping
-              lists so you never buy a duplicate spool again.
-            </p>
           </div>
           <div className="card">
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <h2 style={{margin:0}}>Quick Actions</h2>
-              <button className="btn" style={{fontSize:12,padding:"4px 10px"}} onClick={()=>setEditQuickActions(v=>!v)}>{editQuickActions?"Done":"Customize"}</button>
+            <h2>Quick Actions</h2>
+            <div className="quick-grid">
+              <button className="quick-btn gold"  onClick={()=>setTab("match")}><span className="icon">🔍</span>Match Thread</button>
+              <button className="quick-btn teal"  disabled={isGuest} title={isGuest?"Sign in to access":""} onClick={()=>!isGuest&&setTab("stash")} style={isGuest?{opacity:0.45,cursor:"not-allowed"}:{}}><span className="icon">◈</span>My Stash{isGuest&&" 🔒"}</button>
+              <button className="quick-btn ocean" disabled={isGuest} title={isGuest?"Sign in to access":""} onClick={()=>!isGuest&&(setTab("more"),setMoreSubTab("machines"))} style={isGuest?{opacity:0.45,cursor:"not-allowed"}:{}}><span className="icon">⚙️</span>Machines{isGuest&&" 🔒"}</button>
+              <button className="quick-btn amber" disabled={isGuest} title={isGuest?"Sign in to access":""} onClick={()=>!isGuest&&(setTab("more"),setMoreSubTab("accuquilt"))} style={isGuest?{opacity:0.45,cursor:"not-allowed"}:{}}><span className="icon">◈</span>AccuQuilt{isGuest&&" 🔒"}</button>
+              <button className="quick-btn green" disabled={isGuest} title={isGuest?"Sign in to access":""} onClick={()=>!isGuest&&(setTab("more"),setMoreSubTab("projects"))} style={isGuest?{opacity:0.45,cursor:"not-allowed"}:{}}><span className="icon">◉</span>Projects{isGuest&&" 🔒"}</button>
+              <button className="quick-btn navy"  disabled={isGuest} title={isGuest?"Sign in to access":""} onClick={()=>!isGuest&&(setTab("more"),setMoreSubTab("settings"))} style={isGuest?{opacity:0.45,cursor:"not-allowed"}:{}}><span className="icon">⚙</span>Settings{isGuest&&" 🔒"}</button>
             </div>
-
-            {editQuickActions ? (
-              <div style={{marginTop:10}}>
-                <p className="muted" style={{fontSize:12,marginBottom:8}}>Pick up to 4 to show on your Home screen.</p>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-                  {QUICK_ACTION_CATALOG.map(a=>{
-                    const chosen=(settings.quickActions||DEFAULT_QUICK_ACTIONS).includes(a.key);
-                    const atLimit=(settings.quickActions||DEFAULT_QUICK_ACTIONS).length>=4 && !chosen;
-                    return(
-                      <button key={a.key}
-                        onClick={()=>{
-                          const cur=settings.quickActions||DEFAULT_QUICK_ACTIONS;
-                          let next;
-                          if(chosen) next=cur.filter(k=>k!==a.key);
-                          else { if(cur.length>=4) return; next=[...cur,a.key]; }
-                          setSettings({...settings,quickActions:next});
-                        }}
-                        disabled={atLimit}
-                        style={{
-                          display:"flex",alignItems:"center",gap:8,padding:"8px 10px",
-                          borderRadius:"var(--r-sm)",fontFamily:"Nunito,sans-serif",fontSize:13,fontWeight:600,
-                          cursor:atLimit?"not-allowed":"pointer",textAlign:"left",
-                          border:chosen?"2px solid var(--teal)":"1.5px solid var(--border-teal)",
-                          background:chosen?"var(--teal-pale)":"var(--warm-white)",
-                          color:atLimit?"var(--subtle)":"var(--ink)",opacity:atLimit?0.5:1
-                        }}>
-                        <span>{a.emoji}</span><span style={{flex:1}}>{a.label}</span>{chosen&&<span style={{color:"var(--teal)"}}>✓</span>}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : (
-              <div className="quick-grid">
-                {(settings.quickActions||DEFAULT_QUICK_ACTIONS)
-                  .map(k=>QUICK_ACTION_CATALOG.find(a=>a.key===k))
-                  .filter(Boolean)
-                  .map(a=>{
-                    const locked=a.needsAuth&&isGuest;
-                    return(
-                      <button key={a.key} className={`quick-btn ${a.cls}`}
-                        disabled={locked} title={locked?"Sign in to access":""}
-                        onClick={()=>{ if(locked)return; setTab(a.dest.tab); if(a.dest.sub) setMoreSubTab(a.dest.sub); }}
-                        style={locked?{opacity:0.45,cursor:"not-allowed"}:{}}>
-                        <span className="icon">{a.emoji}</span>{a.label}{locked&&" 🔒"}
-                      </button>
-                    );
-                  })}
-              </div>
-            )}
           </div>
 
           {/* Upgrade prompt on home for free/guest users */}
@@ -4480,7 +4187,6 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
           {subTab==="thread"&&(
             <>
               <div className="card">
-                <h2>Thread Match</h2>
                 {/* Status bar — shows load state and count */}
                 <div style={{
                   marginBottom:12, padding:"7px 12px",
@@ -4667,28 +4373,8 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
               <div className="card">
                 <h2>Camera Color Match</h2>
                 <input className="input" type="file" accept="image/*" capture="environment" onChange={handleCameraImageUpload}/>
-                {cameraImage&&(
-                  <div style={{position:"relative",display:"inline-block",lineHeight:0}}>
-                    <img src={cameraImage} alt="Sample" className="camera-preview" onClick={handleImageSample} style={{cursor:"crosshair"}}/>
-                    {cameraSample&&cameraSample.markerX!=null&&(
-                      <div style={{
-                        position:"absolute",
-                        left:`${cameraSample.markerX}%`,top:`${cameraSample.markerY}%`,
-                        width:18,height:18,transform:"translate(-50%,-50%)",
-                        borderRadius:"50%",border:"2px solid #fff",
-                        boxShadow:"0 0 0 2px rgba(0,0,0,0.6), 0 1px 4px rgba(0,0,0,0.5)",
-                        background:cameraSample.hex,pointerEvents:"none",
-                      }}/>
-                    )}
-                  </div>
-                )}
-                {cameraImage&&<div style={{fontSize:12,color:"var(--muted)",marginTop:6}}>Tap the exact color on the image you want to match.</div>}
-                {cameraSample&&(
-                  <div className="list-box" style={{display:"flex",alignItems:"center",gap:8}}>
-                    <span style={{display:"inline-block",width:20,height:20,borderRadius:4,background:cameraSample.hex,border:"1px solid rgba(0,0,0,0.2)",flexShrink:0}}/>
-                    <span><b>Sampled:</b> {cameraSample.hex} ({cameraSample.r}, {cameraSample.g}, {cameraSample.b})</span>
-                  </div>
-                )}
+                {cameraImage&&<img src={cameraImage} alt="Sample" className="camera-preview" onClick={handleImageSample}/>}
+                {cameraSample&&<div className="list-box"><b>Sampled:</b> {cameraSample.hex} ({cameraSample.r}, {cameraSample.g}, {cameraSample.b})</div>}
               </div>
               {cameraMatches.map((thread,i)=>(
                 <div key={thread.id||thread.code||i}>
@@ -4709,12 +4395,6 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
             <>
               <div className="card">
                 <h2>Solid Fabric Match</h2>
-                <label>Fabric Brand
-                  <select className="input" value={fabricBrandFilter} onChange={e=>setFabricBrandFilter(e.target.value)}>
-                    <option value="All">All brands</option>
-                    {fabricBrandList.map(b=><option key={b} value={b}>{b}</option>)}
-                  </select>
-                </label>
                 <label>Color Family
                   <select className="input" value={colorFamilyKey} onChange={e=>setColorFamilyKey(e.target.value)}>
                     <option value="All">All families</option>
@@ -4723,8 +4403,8 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
                 </label>
                 <label>Search<input className="input" value={matchQuery} onChange={e=>setMatchQuery(e.target.value)} placeholder="Color name, code, brand, Kona match…"/></label>
               </div>
-              {filteredMatchResults.length===0&&(matchQuery.trim()||colorFamilyKey!=="All"||fabricBrandFilter!=="All")&&(
-                <div className="card"><p className="muted">No fabrics found. Try a different brand, family, or search term.</p></div>
+              {filteredMatchResults.length===0&&(matchQuery.trim()||colorFamilyKey!=="All")&&(
+                <div className="card"><p className="muted">No fabrics found. Try a different color family or search term.</p></div>
               )}
               {filteredMatchResults.map((fabric,i)=><FabricMatchCard key={fabric.id||i} fabric={fabric}/>)}
             </>
@@ -4767,26 +4447,17 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
             </button>
           </div>
         ) : (
-        <>
-          <div className="card">
-            <div className="stats-grid">
-              <div className="stat-box"><div className="stat-num">{lowStockCount}</div><div className="stat-label">Low Stock</div></div>
-              <div className="stat-box"><div className="stat-num">{belowTargetCount}</div><div className="stat-label">Below Target</div></div>
-              <div className="stat-box"><div className="stat-num">{mergedShoppingList.length}</div><div className="stat-label">Shopping List</div></div>
-            </div>
-          </div>
-          <UniversalStash
-            supabase={supabase} userId={userId}
-            shoppingList={shoppingList} mergedShoppingList={mergedShoppingList}
-            threads={threads} updateSpools={updateSpools}
-            updateInventoryTarget={updateInventoryTarget}
-            addManualShoppingItem={addManualShoppingItem}
-            removeShoppingItem={removeShoppingItem}
-            settings={settings}
-            userSettings={settings}
-            userPlan={userPlan}
-          />
-        </>
+        <UniversalStash
+          supabase={supabase} userId={userId}
+          shoppingList={shoppingList} mergedShoppingList={mergedShoppingList}
+          threads={threads} updateSpools={updateSpools}
+          updateInventoryTarget={updateInventoryTarget}
+          addManualShoppingItem={addManualShoppingItem}
+          removeShoppingItem={removeShoppingItem}
+          settings={settings}
+          userSettings={settings}
+          userPlan={userPlan}
+        />
         )
       )}
 

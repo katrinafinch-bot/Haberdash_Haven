@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Haberdash Haven — Admin</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800&family=Nunito:wght@400;600;700;800&family=Caveat:wght@600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --sun-gold:#E8A800; --sun-amber:#C97B00; --sun-pale:#FFF8DC;
+    --teal:#0D5252; --teal-mid:#1A7070; --teal-light:#D6EFEF; --teal-pale:#EEF8F8;
+    --linen:#FDF6E3; --parchment:#F7EDCC; --cream:#FEFAF0; --warm-white:#FFFEF9;
+    --body-bg:#EDE8D5; --ink:#1C2B2B; --ink-soft:#2A3D3D; --muted:#5C6E6E;
+    --border-teal:#B8D8D8; --border-warm:#D4C090; --bad:#A8322D; --bad-pale:#F7E7E6;
+    --shadow-sm:0 2px 8px rgba(13,82,82,.10),0 1px 3px rgba(0,0,0,.06);
+    --shadow-md:0 4px 16px rgba(13,82,82,.14),0 2px 6px rgba(0,0,0,.08);
+    --r:16px; --r-sm:9px; --r-xs:4px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Nunito',sans-serif;background:var(--body-bg);color:var(--ink);line-height:1.55}
+  h1,h2,h3{font-family:'Playfair Display',serif}
+  header{background:var(--teal);color:var(--warm-white);padding:18px 28px;display:flex;align-items:center;gap:16px;box-shadow:var(--shadow-md)}
+  header h1{font-size:22px;font-weight:800}
+  header .tag{font-family:'Caveat',cursive;font-size:18px;color:var(--sun-pale)}
+  header .badge{margin-left:auto;font-size:12px;font-weight:700;color:var(--teal);background:var(--sun-gold);padding:5px 12px;border-radius:9999px}
+  .gate{max-width:440px;margin:70px auto;background:var(--warm-white);border:1px solid var(--border-warm);border-radius:var(--r);padding:32px;box-shadow:var(--shadow-md)}
+  .gate h2{margin-bottom:8px;font-size:20px;color:var(--teal)}
+  .gate p{color:var(--muted);font-size:14px;margin-bottom:18px}
+  label{display:block;font-size:13px;font-weight:700;margin:0 0 5px;color:var(--ink-soft)}
+  input,textarea,select{width:100%;padding:10px 12px;border:1px solid var(--border-warm);border-radius:var(--r-sm);font:inherit;background:var(--cream)}
+  input:focus,textarea:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px var(--teal-light)}
+  .btn{background:var(--teal);color:var(--warm-white);border:none;padding:9px 16px;border-radius:var(--r-sm);font:inherit;font-weight:700;cursor:pointer;transition:.15s}
+  .btn:hover{background:var(--teal-mid)}
+  .btn:disabled{opacity:.5;cursor:default}
+  .btn.gold{background:var(--sun-gold);color:var(--teal)}
+  .btn.gold:hover{background:var(--sun-amber);color:var(--warm-white)}
+  .btn.ghost{background:transparent;color:var(--teal);border:1px solid var(--teal)}
+  .btn.ghost:hover{background:var(--teal-pale)}
+  .btn.danger{background:var(--bad)}
+  .btn.danger:hover{background:#8a2824}
+  .btn.sm{padding:4px 11px;font-size:12px}
+  nav{display:flex;gap:2px;background:var(--warm-white);padding:0 28px;border-bottom:1px solid var(--border-warm);overflow-x:auto}
+  nav button{background:none;border:none;padding:14px 18px;font:inherit;font-weight:700;color:var(--muted);cursor:pointer;border-bottom:3px solid transparent;white-space:nowrap}
+  nav button.active{color:var(--teal);border-bottom-color:var(--sun-gold)}
+  main{max-width:1100px;margin:0 auto;padding:28px}
+  .card{background:var(--warm-white);border:1px solid var(--border-warm);border-radius:var(--r);padding:22px;margin-bottom:18px;box-shadow:var(--shadow-sm)}
+  .card h2{font-size:18px;margin-bottom:14px;color:var(--teal)}
+  .row-between{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+  .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}
+  .stat{background:var(--teal-pale);border:1px solid var(--border-teal);border-radius:var(--r-sm);padding:18px}
+  .stat .n{font-family:'Playfair Display',serif;font-size:32px;font-weight:800;color:var(--teal)}
+  .stat .l{font-size:13px;color:var(--muted);margin-top:2px}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--border-warm);vertical-align:top}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:800}
+  tr:hover td{background:var(--cream)}
+  .muted{color:var(--muted);font-size:14px}
+  .pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:9999px}
+  .pill.admin{background:var(--sun-gold);color:var(--teal)}
+  .pill.premium{background:var(--teal-light);color:var(--teal)}
+  .pill.free{background:var(--parchment);color:var(--muted-warm,#7A6B50)}
+  .search{max-width:360px;margin-bottom:14px}
+  .empty{text-align:center;color:var(--muted);padding:30px;font-style:italic}
+  .err{background:var(--bad-pale);color:var(--bad);border:1px solid var(--bad);border-radius:var(--r-sm);padding:10px 14px;font-size:13px;margin-bottom:12px}
+  .link{color:var(--teal);font-weight:700;cursor:pointer;text-decoration:underline}
+  .back{margin-bottom:14px}
+  .post-body{white-space:pre-wrap;margin:8px 0;color:var(--ink-soft)}
+  .comment{border-left:3px solid var(--teal-light);padding:8px 0 8px 14px;margin:10px 0}
+  .spinner{text-align:center;padding:40px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+// ── CONFIG ──────────────────────────────────────────────────
+const SUPABASE_URL = "https://sbupkbtvaujvwwslqjnd.supabase.co";
+// PASTE YOUR PUBLISHABLE (anon) KEY BELOW. Safe to embed — NOT the service_role key.
+const SUPABASE_ANON_KEY = "sb_publishable_-EzJs1Sxr6SklOUjZ0j-ow_hc1zHedq";
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const app = document.getElementById("app");
+let session = null, isAdmin = false, tab = "dashboard";
+let state = {};
+
+// ── HELPERS ─────────────────────────────────────────────────
+const esc = s => String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmtDate = ts => ts ? new Date(ts).toLocaleDateString() : "";
+function shorten(s,n){ s=String(s||""); return s.length>n ? s.slice(0,n)+"…" : s; }
+
+async function init(){
+  if(SUPABASE_ANON_KEY==="PASTE_YOUR_ANON_KEY_HERE"){ return renderConfigError(); }
+  const { data } = await sb.auth.getSession();
+  session = data.session;
+  if(!session) return renderLogin();
+  const { data:prof } = await sb.from("profiles").select("is_admin").eq("id",session.user.id).maybeSingle();
+  isAdmin = !!(prof && prof.is_admin);
+  if(!isAdmin) return renderDenied();
+  renderShell(); loadTab();
+}
+
+function renderConfigError(){
+  app.innerHTML = `<div class="gate"><h2>Setup needed</h2><p>Open this file and paste your Supabase publishable (anon) key into <b>SUPABASE_ANON_KEY</b> near the top of the script.</p></div>`;
+}
+function renderLogin(){
+  app.innerHTML = `<div class="gate">
+    <h2>Admin sign in</h2>
+    <p>Sign in with your Haberdash Haven admin account.</p>
+    <div id="loginErr"></div>
+    <label>Email</label><input id="email" type="email" autocomplete="username" style="margin-bottom:12px">
+    <label>Password</label><input id="pw" type="password" autocomplete="current-password" style="margin-bottom:16px">
+    <button class="btn" style="width:100%" onclick="doLogin()">Sign in</button>
+  </div>`;
+}
+window.doLogin = async function(){
+  const email=document.getElementById("email").value.trim();
+  const password=document.getElementById("pw").value;
+  const errEl=document.getElementById("loginErr");
+  errEl.innerHTML="";
+  const { error } = await sb.auth.signInWithPassword({email,password});
+  if(error){ errEl.innerHTML=`<div class="err">${esc(error.message)}</div>`; return; }
+  init();
+};
+function renderDenied(){
+  app.innerHTML = `<div class="gate"><h2>Access denied</h2><p>This account is not an admin. <span class="link" onclick="doLogout()">Sign out</span></p></div>`;
+}
+window.doLogout = async function(){ await sb.auth.signOut(); session=null; isAdmin=false; init(); };
+
+function renderShell(){
+  const tabs=[["dashboard","Dashboard"],["threads","Threads"],["fabrics","Fabrics"],["users","Users"],["forum","Forum"]];
+  app.innerHTML = `
+    <header>
+      <h1>Haberdash Haven</h1>
+      <span class="tag">Admin Console</span>
+      <span class="badge">ADMIN</span>
+    </header>
+    <nav>${tabs.map(([k,l])=>`<button class="${k===tab?'active':''}" onclick="switchTab('${k}')">${l}</button>`).join("")}
+      <button style="margin-left:auto;color:var(--bad)" onclick="doLogout()">Sign out</button>
+    </nav>
+    <main id="main"><div class="spinner">Loading…</div></main>`;
+}
+window.switchTab = function(t){ tab=t; document.querySelectorAll("nav button").forEach(b=>b.classList.remove("active")); renderShell(); loadTab(); };
+
+function loadTab(){
+  if(tab==="dashboard") return loadDashboard();
+  if(tab==="threads") return loadThreads();
+  if(tab==="fabrics") return loadFabrics();
+  if(tab==="users") return loadUsers();
+  if(tab==="forum") return loadForum();
+}
+const main = () => document.getElementById("main");
+
+// ── DASHBOARD ───────────────────────────────────────────────
+async function loadDashboard(){
+  main().innerHTML=`<div class="spinner">Loading stats…</div>`;
+  const count = async (t,filter) => { let q=sb.from(t).select("id",{count:"exact",head:true}); if(filter)q=filter(q); const{count:c}=await q; return c||0; };
+  const [threads,fabrics,rulers,machines,users,posts,comments] = await Promise.all([
+    count("thread_library"), count("fabric_library"), count("ruler_library"),
+    count("machine_library"), count("profiles"), count("forum_posts"), count("forum_comments")
+  ]);
+  const stats=[["Threads",threads],["Fabrics",fabrics],["Rulers",rulers],["Machines",machines],["Users",users],["Forum posts",posts],["Comments",comments]];
+  main().innerHTML=`<div class="card"><h2>Library &amp; community at a glance</h2>
+    <div class="stat-grid">${stats.map(([l,n])=>`<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("")}</div></div>`;
+}
+
+// ── THREADS ─────────────────────────────────────────────────
+async function loadThreads(){
+  main().innerHTML=`<div class="spinner">Loading threads…</div>`;
+  const { data, error } = await sb.from("thread_library").select("*").order("brand").order("color_code").limit(1000);
+  if(error) return main().innerHTML=`<div class="card"><div class="err">${esc(error.message)}</div></div>`;
+  state.threads=data||[];
+  renderThreads("");
+}
+function renderThreads(filter){
+  const f=filter.toLowerCase();
+  const all=state.threads||[];
+  const rows=all.filter(t=>!f||[t.brand,t.color_code,t.color_name,t.family,t.fiber_type,t.nearest_isacord_name].some(v=>String(v||"").toLowerCase().includes(f)));
+  main().innerHTML=`<div class="card">
+    <div class="row-between"><h2>Thread Library (${all.length})</h2></div>
+    <input class="search" placeholder="Search brand, code, name, family, Isacord match…" oninput="renderThreads(this.value)" value="${esc(filter)}">
+    <table><thead><tr><th>Swatch</th><th>Brand</th><th>Color</th><th>Code</th><th>Hex</th><th>Family</th><th>Fiber</th><th>Wt</th><th>Nearest Isacord</th></tr></thead>
+    <tbody>${rows.slice(0,500).map(t=>`<tr>
+      <td>${t.hex_color?`<span style="display:inline-block;width:30px;height:20px;border-radius:4px;border:1px solid #0003;background:${esc(t.hex_color)}"></span>`:""}</td>
+      <td>${esc(t.brand)}</td>
+      <td>${esc(t.color_name)}</td>
+      <td>${esc(t.color_code)}</td>
+      <td><span class="muted" style="font-size:12px">${esc(t.hex_color)}</span></td>
+      <td>${esc(t.family)}</td>
+      <td>${esc(t.fiber_type)}</td>
+      <td>${esc(t.weight)}</td>
+      <td>${esc(t.nearest_isacord_name||t.nearest_isacord)}</td></tr>`).join("")||`<tr><td colspan="9" class="empty">No matches</td></tr>`}</tbody></table>
+    ${rows.length>500?`<p class="muted" style="margin-top:10px">Showing first 500 of ${rows.length}.</p>`:""}
+  </div>`;
+}
+
+// ── FABRICS ─────────────────────────────────────────────────
+async function loadFabrics(){
+  main().innerHTML=`<div class="spinner">Loading fabrics…</div>`;
+  const { data, error } = await sb.from("fabric_library").select("*").order("brand").order("color_name").limit(2000);
+  if(error) return main().innerHTML=`<div class="card"><div class="err">${esc(error.message)}</div></div>`;
+  state.fabrics=data||[];
+  renderFabrics("");
+}
+function renderFabrics(filter){
+  const f=filter.toLowerCase();
+  const all=state.fabrics||[];
+  const rows=all.filter(x=>!f||[x.brand,x.color_name,x.color_code,x.family,x.nearest_kona_name].some(v=>String(v||"").toLowerCase().includes(f)));
+  main().innerHTML=`<div class="card">
+    <h2>Fabric Library (${all.length})</h2>
+    <input class="search" placeholder="Search brand, color, family, Kona match…" oninput="renderFabrics(this.value)" value="${esc(filter)}">
+    <table><thead><tr><th>Swatch</th><th>Brand</th><th>Color</th><th>Code</th><th>Hex</th><th>Family</th><th>Nearest Kona</th></tr></thead>
+    <tbody>${rows.slice(0,500).map(x=>`<tr>
+      <td>${x.hex_color?`<span style="display:inline-block;width:30px;height:20px;border-radius:4px;border:1px solid #0003;background:${esc(x.hex_color)}"></span>`:""}</td>
+      <td>${esc(x.brand)}</td>
+      <td>${esc(x.color_name)}</td>
+      <td>${esc(x.color_code)}</td>
+      <td><span class="muted" style="font-size:12px">${esc(x.hex_color)}</span></td>
+      <td>${esc(x.family)}</td>
+      <td>${esc(x.nearest_kona_name||x.nearest_kona)}</td></tr>`).join("")||`<tr><td colspan="7" class="empty">No matches</td></tr>`}</tbody></table>
+    ${rows.length>500?`<p class="muted" style="margin-top:10px">Showing first 500 of ${rows.length}.</p>`:""}
+  </div>`;
+}
+
+// ── USERS ───────────────────────────────────────────────────
+async function loadUsers(){
+  main().innerHTML=`<div class="spinner">Loading users…</div>`;
+  const { data, error } = await sb.from("profiles").select("*").order("created_at",{ascending:false}).limit(1000);
+  if(error) return main().innerHTML=`<div class="card"><div class="err">${esc(error.message)}</div></div>`;
+  state.users=data||[];
+  renderUsers("");
+}
+function planPill(u){
+  if(u.is_admin) return `<span class="pill admin">Admin</span>`;
+  const raw=u.plan||(u.is_premium?"premium":"free");
+  if(raw==="premium"||u.is_premium) return `<span class="pill premium">Premium</span>`;
+  if(raw==="basic") return `<span class="pill premium">Basic</span>`;
+  return `<span class="pill free">Free</span>`;
+}
+function renderUsers(filter){
+  const f=filter.toLowerCase();
+  const all=state.users||[];
+  const rows=all.filter(u=>!f||[u.username,u.display_name,u.id].some(v=>String(v||"").toLowerCase().includes(f)));
+  main().innerHTML=`<div class="card">
+    <h2>Users (${all.length})</h2>
+    <input class="search" placeholder="Search username, name, id…" oninput="renderUsers(this.value)" value="${esc(filter)}">
+    <table><thead><tr><th>User</th><th>Plan</th><th>Joined</th></tr></thead>
+    <tbody>${rows.slice(0,400).map(u=>`<tr>
+      <td><b>${esc(u.display_name||u.username||"—")}</b><br><span class="muted" style="font-size:12px">${esc(u.id)}</span></td>
+      <td>${planPill(u)}</td><td>${fmtDate(u.created_at)}</td></tr>`).join("")||`<tr><td colspan="3" class="empty">No users</td></tr>`}</tbody></table>
+  </div>`;
+}
+
+// ── FORUM MODERATION ────────────────────────────────────────
+async function loadForum(){
+  main().innerHTML=`<div class="spinner">Loading forum…</div>`;
+  const { data, error } = await sb.from("forum_posts").select("*").order("created_at",{ascending:false}).limit(500);
+  if(error) return main().innerHTML=`<div class="card"><div class="err">${esc(error.message)}</div></div>`;
+  state.posts=data||[];
+  state.viewPost=null;
+  renderForum("");
+}
+function renderForum(filter){
+  const f=(filter||"").toLowerCase();
+  const all=state.posts||[];
+  const rows=all.filter(p=>!f||[p.title,p.body].some(v=>String(v||"").toLowerCase().includes(f)));
+  main().innerHTML=`<div class="card">
+    <h2>Forum Posts (${all.length})</h2>
+    <input class="search" placeholder="Search posts…" oninput="renderForum(this.value)" value="${esc(filter)}">
+    <table><thead><tr><th>Title</th><th>Author</th><th>Votes</th><th>Comments</th><th>Posted</th><th></th></tr></thead>
+    <tbody>${rows.slice(0,300).map(p=>`<tr>
+      <td><span class="link" onclick="openForumPost('${p.id}')">${esc(shorten(p.title,70))}</span></td>
+      <td class="muted" style="font-size:12px">${esc(shorten(p.user_id,12))}…</td>
+      <td>${p.vote_count??"—"}</td><td>${p.comment_count??"—"}</td><td>${fmtDate(p.created_at)}</td>
+      <td><button class="btn danger sm" onclick="deletePost('${p.id}')">Delete</button></td></tr>`).join("")||`<tr><td colspan="6" class="empty">No posts</td></tr>`}</tbody></table>
+  </div>`;
+}
+window.openForumPost = async function(id){
+  const post=(state.posts||[]).find(p=>p.id===id); if(!post)return;
+  main().innerHTML=`<div class="spinner">Loading post…</div>`;
+  const { data:comments } = await sb.from("forum_comments").select("*").eq("post_id",id).order("created_at",{ascending:true});
+  main().innerHTML=`
+    <div class="back"><button class="btn ghost sm" onclick="switchTab('forum')">← All posts</button></div>
+    <div class="card">
+      <div class="row-between"><h2>${esc(post.title)}</h2><button class="btn danger sm" onclick="deletePost('${post.id}')">Delete post</button></div>
+      <p class="muted" style="font-size:12px">Author ${esc(post.user_id)} · ${fmtDate(post.created_at)}</p>
+      <p class="post-body">${esc(post.body)}</p>
+    </div>
+    <div class="card">
+      <h2>Comments (${(comments||[]).length})</h2>
+      ${(comments||[]).map(c=>`<div class="comment">
+        <div class="row-between"><span class="muted" style="font-size:12px">${esc(c.user_id)} · ${fmtDate(c.created_at)}</span>
+        <button class="btn danger sm" onclick="deleteComment('${c.id}','${post.id}')">Delete</button></div>
+        <p class="post-body" style="margin:4px 0 0">${esc(c.body)}</p></div>`).join("")||`<p class="empty">No comments</p>`}
+    </div>`;
+};
+window.deletePost = async function(id){
+  if(!confirm("Delete this post permanently? Its comments and votes go too."))return;
+  const { error } = await sb.from("forum_posts").delete().eq("id",id);
+  if(error) return alert("Delete failed: "+error.message+"\n\nCheck that admin-override RLS policies are applied.");
+  state.posts=(state.posts||[]).filter(p=>p.id!==id);
+  switchTab("forum");
+};
+window.deleteComment = async function(id,postId){
+  if(!confirm("Delete this comment?"))return;
+  const { error } = await sb.from("forum_comments").delete().eq("id",id);
+  if(error) return alert("Delete failed: "+error.message);
+  openForumPost(postId);
+};
+
+init();
+</script>
+</body>
+</html>

@@ -1,120 +1,79 @@
-# ✿ Haberdash Haven
+# Haberdash Haven
 
-> **Making the world a better place. One stitch at a time...**
+> **Stitch. Match. Thrive.**
+> The app that knows your supplies.
 
-A mobile-first inventory and reference app for quilters, embroiderers, and sewists.
-
-![Haberdash Haven](public/HH_Logo.png)
-
----
-
-## Features
-
-- 🧵 **Thread Match** — Search 4,200+ thread colors across 26 brands (Isacord, Glide, King Tut, Aurifil, Floriani, Gutermann, and more)
-- ⇄ **Cross-Reference** — Find the nearest color equivalent between any two thread brands, powered by 486,000+ pre-computed color distance matches
-- 📷 **Camera Match** — Photograph a fabric or thread and find the closest color match
-- ▦ **Barcode Scanner** — Scan any thread spool barcode for instant identification
-- ◈ **Full Stash Management** — Track threads, rulers, machines, AccuQuilt dies, presser feet, and accessories
-- ⚙️ **Machine Library** — 280+ machines with serial number tracking, purchase records, warranty dates, and computerized/mechanical distinction
-- 👟 **Presser Feet** — 90+ presser feet organized by category
-- ◉ **Projects** — Build project thread lists with color swatches
-- 🌍 **10 Languages** — English, German, French, Dutch, Spanish, Portuguese, Japanese, Korean, Chinese
-- 📊 **CSV Export** — Export your entire stash for insurance records or guild inventory
-- 🎨 **Cozy Cottage Design** — Watercolor sunflowers, cobalt sky palette
+Haberdash Haven is a mobile-first productivity app for quilters, embroiderers, and sewists. Manage your full sewing room inventory — threads, fabric, rulers, machines, patterns, dies, and the oddball notions in between — in one place that actually understands how you work.
 
 ---
 
-## Stack
+## What it does
 
-| Layer | Technology |
-|---|---|
-| Frontend | React 18 + Vite |
-| Backend / Auth / DB | Supabase |
-| Styling | CSS (custom, no framework) |
-| Fonts | Playfair Display · Nunito · Caveat |
-| Deployment | Vercel |
+### Inventory
+- **Thread library** — 390+ Isacord 40 colors plus your own brands and custom entries
+- **Fabric stash** — by yardage, weight, fiber, and color
+- **Ruler library** — 190+ rulers across every quilting, piecing, and pattern-drafting category
+- **Machine library** — 77 machines with model details and your personal photos
+- **Patterns, feet, dies, AccuQuilt** — everything else that lives in your sewing room
+- **Misc. supplies** — a flexible bucket for vintage notions, oddball tools, anything that doesn't fit a category
+
+### Smart features
+- **Thread Match Engine** — find what you have that matches a target color
+- **Camera Color Match** — point your phone at a fabric, get thread suggestions
+- **Barcode Scanner** — built-in BarcodeDetector for fast adds
+- **Auto-Sync Library** — public reference data updates without overwriting your stash
+- **Stash Deduction** — log a project, watch your inventory adjust
+- **Phrase Search** — full-text filter across brand, color, code, notes, and tags
+
+### Project management
+- Project list with photos, journal, costs, and per-project fabric/thread allocation
+- Shopping list that builds itself from low-stock items and project gaps
+- Insurance report builder for stash valuation
+
+### Community (Premium)
+- Forum with posts, comments, follows, and voting
+- Share projects, ask questions, compare techniques
 
 ---
 
-## Getting Started
+## Tech stack
 
-### Prerequisites
-- Node.js 18+
-- Supabase account
+- **Frontend:** React 18 + Vite
+- **Backend:** Supabase (Postgres + Auth + Storage + RLS)
+- **Mobile wrapper:** Capacitor (in planning)
+- **Billing:** RevenueCat (mobile), Stripe (web)
+- **Hosting:** Vercel
 
-### Install
+### Brand
+Black · Deep teal (`#004D4D`) · Silver
+
+---
+
+## Project status
+
+In active development. Public launch targeted for August. iOS App Store and Google Play Store submissions in planning.
+
+---
+
+## Setup (developers)
+
 ```bash
-git clone https://github.com/katrinafinch-bot/Haberdash-Haven.git
-cd Haberdash-Haven
 npm install
-```
-
-### Configure
-Edit `src/main.jsx` and set your Supabase URL and anon key:
-```js
-const SUPABASE_URL = "https://your-project.supabase.co";
-const SUPABASE_KEY = "your-anon-key";
-```
-
-### Run
-```bash
 npm run dev
 ```
 
----
-
-## Database Setup
-
-Run the SQL migration files in `supabase/migrations/` in order (029 → 039) using the Supabase SQL Editor.
-
-Key migrations:
-| File | Description |
-|---|---|
-| `037_merge_thread_tables.sql` | Merges Isacord-only table into unified thread_library |
-| `038_crossref_table.sql` | Creates pre-computed cross-reference table |
-| `039_machine_computerized.sql` | Adds computerized/mechanical flag to machines |
+Environment variables required in `.env`:
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
 
 ---
 
-## Cross-Reference Generation
+## Admin
 
-After setting up the database, generate the 486,000+ pre-computed color matches:
-
-```bash
-# Using Node.js (recommended)
-node scripts/generate_crossref.mjs
-
-# Regenerate from scratch after adding new brands
-node scripts/generate_crossref.mjs --regenerate
-```
-
-This takes ~5 minutes and only needs to be re-run when new thread brands are added.
-
----
-
-## Project Structure
-
-```
-haberdash-haven/
-├── public/
-│   └── HH_Logo.png
-├── src/
-│   ├── App.jsx          # Main app (2,300+ lines)
-│   ├── main.jsx         # Supabase auth wiring
-│   ├── styles.css       # Full brand styles
-│   ├── i18n.js          # 116 translation keys × 10 languages
-│   └── data/
-│       └── thread-library.json   # Local starter data
-├── scripts/
-│   ├── generate_crossref.mjs    # Cross-reference generator (Node)
-│   └── generate_crossref.py     # Cross-reference generator (Python)
-├── supabase/
-│   └── migrations/              # SQL migration files 029–039
-└── README.md
-```
+Standalone admin panel: `haberdash-haven-admin.html` — no build process, opens in a browser. Admin access controlled via `profiles.is_admin = true` in Supabase.
 
 ---
 
 ## License
 
-Private — all rights reserved. © Haberdash Haven.
+Proprietary. All rights reserved.
