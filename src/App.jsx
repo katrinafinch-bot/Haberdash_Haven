@@ -4556,7 +4556,10 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
           </div>
         </div>
 
-        {/* Notification bell — signed-in users only */}
+        {/* Notification bell button — signed-in users only. The dropdown panel
+            is rendered OUTSIDE the header (below), because .card:hover applies a
+            CSS transform to this header, and a transformed ancestor re-anchors
+            position:fixed children — which made the panel chase the cursor. */}
         {user && !isGuest && (
           <div style={{position:"absolute",top:12,right:12,zIndex:20}}>
             <button
@@ -4577,57 +4580,59 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
                 }}>{unreadCount>9?"9+":unreadCount}</span>
               )}
             </button>
-
-            {showNotifs && (
-              <>
-                {/* Backdrop — tap anywhere to close. Captures clicks so nothing behind reacts. */}
-                <div
-                  onClick={()=>setShowNotifs(false)}
-                  style={{position:"fixed",inset:0,zIndex:999,background:"rgba(0,0,0,0.15)"}}
-                />
-                <div style={{
-                  position:"fixed",top:64,right:12,width:300,maxWidth:"86vw",zIndex:1000,
-                  background:"var(--warm-white)",border:"1.5px solid var(--border-teal)",
-                  borderRadius:"var(--r-md)",boxShadow:"0 8px 28px rgba(0,0,0,0.22)",
-                  overflow:"hidden",textAlign:"left"
-                }}
-                  onClick={e=>e.stopPropagation()}>
-                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
-                    padding:"10px 14px",borderBottom:"1px solid var(--border-teal)",background:"var(--teal-pale)"}}>
-                    <span style={{fontWeight:800,fontSize:13,color:"var(--teal)"}}>Notifications</span>
-                    <span style={{fontSize:16,cursor:"pointer",color:"var(--muted)"}} onClick={()=>setShowNotifs(false)}>✕</span>
-                  </div>
-
-                  {visibleNotifs.length===0 ? (
-                    <div style={{padding:"22px 16px",textAlign:"center"}}>
-                      <div style={{fontSize:26,marginBottom:6}}>✨</div>
-                      <p className="muted" style={{fontSize:13,margin:0}}>You're all caught up.</p>
-                    </div>
-                  ) : (
-                    <div style={{maxHeight:320,overflowY:"auto"}}>
-                      {visibleNotifs.map(n=>(
-                        <div key={n.id} style={{display:"flex",gap:10,padding:"11px 14px",
-                          borderBottom:"1px solid var(--teal-pale)",alignItems:"flex-start"}}>
-                          <div style={{fontSize:18,flexShrink:0,lineHeight:1.2}}>{n.icon}</div>
-                          <div style={{flex:1,minWidth:0,cursor:"pointer"}}
-                            onClick={()=>{ if(n.dest_tab){ setTab(n.dest_tab); if(n.dest_sub) setMoreSubTab(n.dest_sub); } setShowNotifs(false); }}>
-                            <div style={{fontWeight:700,fontSize:13,color:"var(--ink)"}}>{n.title}</div>
-                            {n.body&&<div style={{fontSize:12,color:"var(--muted)",marginTop:1}}>{n.body}</div>}
-                          </div>
-                          <span title="Dismiss" style={{fontSize:13,cursor:"pointer",color:"var(--subtle)",flexShrink:0}}
-                            onClick={()=>dismissNotif(n.id)}>✕</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
           </div>
         )}
 
         <div className="hero-bar" style={{pointerEvents:"none"}}></div>
       </header>
+
+      {/* ── Notification dropdown — rendered at app-shell level, OUTSIDE the
+          .card header, so no ancestor transform can re-anchor it. ── */}
+      {user && !isGuest && showNotifs && (
+        <>
+          {/* Backdrop — tap anywhere to close. */}
+          <div
+            onClick={()=>setShowNotifs(false)}
+            style={{position:"fixed",inset:0,zIndex:999,background:"rgba(0,0,0,0.15)"}}
+          />
+          <div style={{
+            position:"fixed",top:64,right:12,width:300,maxWidth:"86vw",zIndex:1000,
+            background:"var(--warm-white)",border:"1.5px solid var(--border-teal)",
+            borderRadius:"var(--r-md)",boxShadow:"0 8px 28px rgba(0,0,0,0.22)",
+            overflow:"hidden",textAlign:"left"
+          }}
+            onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+              padding:"10px 14px",borderBottom:"1px solid var(--border-teal)",background:"var(--teal-pale)"}}>
+              <span style={{fontWeight:800,fontSize:13,color:"var(--teal)"}}>Notifications</span>
+              <span style={{fontSize:16,cursor:"pointer",color:"var(--muted)"}} onClick={()=>setShowNotifs(false)}>✕</span>
+            </div>
+
+            {visibleNotifs.length===0 ? (
+              <div style={{padding:"22px 16px",textAlign:"center"}}>
+                <div style={{fontSize:26,marginBottom:6}}>✨</div>
+                <p className="muted" style={{fontSize:13,margin:0}}>You're all caught up.</p>
+              </div>
+            ) : (
+              <div style={{maxHeight:320,overflowY:"auto"}}>
+                {visibleNotifs.map(n=>(
+                  <div key={n.id} style={{display:"flex",gap:10,padding:"11px 14px",
+                    borderBottom:"1px solid var(--teal-pale)",alignItems:"flex-start"}}>
+                    <div style={{fontSize:18,flexShrink:0,lineHeight:1.2}}>{n.icon}</div>
+                    <div style={{flex:1,minWidth:0,cursor:"pointer"}}
+                      onClick={()=>{ if(n.dest_tab){ setTab(n.dest_tab); if(n.dest_sub) setMoreSubTab(n.dest_sub); } setShowNotifs(false); }}>
+                      <div style={{fontWeight:700,fontSize:13,color:"var(--ink)"}}>{n.title}</div>
+                      {n.body&&<div style={{fontSize:12,color:"var(--muted)",marginTop:1}}>{n.body}</div>}
+                    </div>
+                    <span title="Dismiss" style={{fontSize:13,cursor:"pointer",color:"var(--subtle)",flexShrink:0}}
+                      onClick={()=>dismissNotif(n.id)}>✕</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
 
       {/* ── 4-tab main nav ── */}
       <nav className="nav-row main-nav" style={{position:"relative",zIndex:1}}>
