@@ -4,6 +4,7 @@ import { t, LANGUAGES, getColorFamilies } from "./i18n.js";
 import { ProjectsTab } from "./ProjectsTab.jsx";
 import InsuranceReportBuilder from "./InsuranceReportBuilder.jsx";
 import PhotoUploader from "./PhotoUploader.jsx";
+import SpoolQuest from "./SpoolQuest.jsx";
 
 // ─────────────────────────────────────────────────────────────
 // CONSTANTS
@@ -116,6 +117,30 @@ const emptyForm = { name:"",family:"Unsorted",isacord:"",barcode:"",weight:"40 w
 const emptyProject = { name:"",status:"Planning",notes:"" };
 
 // ─────────────────────────────────────────────────────────────
+// PRICING — single source of truth for plan prices.
+// monthly = charged per month; annual = charged once per year.
+// (Billing is not wired up yet; these drive display only.)
+// ─────────────────────────────────────────────────────────────
+const PLAN_PRICING = {
+  basic:   { monthly: 4.99, annual: 50 },
+  premium: { monthly: 9.99, annual: 100 },
+};
+const fmtPrice = n => Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`;
+// Price label for a plan + cycle, e.g. "$4.99/mo" or "$50/yr"
+function priceLabel(plan, cycle){
+  const p = PLAN_PRICING[plan]; if(!p) return "";
+  return cycle==="annual" ? `${fmtPrice(p.annual)}/yr` : `${fmtPrice(p.monthly)}/mo`;
+}
+// Annual savings vs paying monthly for 12 months, as a whole-dollar amount and %.
+function annualSavings(plan){
+  const p = PLAN_PRICING[plan]; if(!p) return null;
+  const yearlyIfMonthly = p.monthly*12;
+  const saved = yearlyIfMonthly - p.annual;
+  if(saved<=0) return null;
+  return { amount: Math.round(saved), pct: Math.round((saved/yearlyIfMonthly)*100) };
+}
+
+// ─────────────────────────────────────────────────────────────
 // HELPERS
 // ─────────────────────────────────────────────────────────────
 function versionCompare(a,b){
@@ -181,6 +206,29 @@ function findNearestInPool(hexOrObj, pool){
     if(d<bestDist){ bestDist=d; best=item; }
   }
   return best;
+}
+
+// Perceptual distance using CIELAB (Delta-E 76) when lab columns exist,
+// falling back to RGB Euclidean. Lower = closer. fabric_library has lab_l/a/b.
+function perceptualDistance(src, item){
+  if(src && src.lab_l!=null && item.lab_l!=null){
+    const dl=src.lab_l-item.lab_l, da=src.lab_a-item.lab_a, db=src.lab_b-item.lab_b;
+    return Math.sqrt(dl*dl+da*da+db*db);
+  }
+  const sRgb = src && src.r!=null ? {r:src.r,g:src.g,b:src.b} : hexToRgb(src && src.hex_color);
+  const iRgb = item.r!=null ? {r:item.r,g:item.g,b:item.b} : hexToRgb(item.hex_color);
+  return colorDistance(sRgb, iRgb);
+}
+
+// Find the N nearest items in a pool, perceptually. Used for thread → closest fabrics.
+function findNearestN(src, pool, n=3){
+  if(!src || !pool || !pool.length) return [];
+  return pool
+    .map(item=>({item, d:perceptualDistance(src, item)}))
+    .filter(x=>Number.isFinite(x.d))
+    .sort((a,b)=>a.d-b.d)
+    .slice(0,n)
+    .map(x=>x.item);
 }
 
 // Sort comparator: groups visually-similar colors together (hue, then lightness, then saturation).
@@ -466,7 +514,7 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
     setLoading(true);
     try{
       const [{data:th},{data:fa},{data:ru},{data:ma},{data:di},{data:fe},{data:fsh},{data:csh}] = await Promise.all([
-        supabase.from("user_inventory").select("spool_count,thread_library(id,brand,brand_key,color_code,color_name,hex_color,fiber_type,weight)").eq("user_id",userId),
+        supabase.from("user_inventory").select("id,spool_count,inventory_target,thread_library(id,brand,brand_key,color_code,color_name,hex_color,fiber_type,weight)").eq("user_id",userId),
         supabase.from("user_fabric_inventory").select("id,notes,fabric_library(id,brand,color_code,color_name,hex_color,family,nearest_kona_name)").eq("user_id",userId),
         supabase.from("user_rulers").select("quantity,ruler_library(brand,name,category,size,sku)").eq("user_id",userId),
         supabase.from("user_machines").select("machine_id,serial_number,purchase_date,purchase_price,dealer,warranty_until,user_notes,machine_library(id,brand,model,type,category,throat_space,fun_fact,is_computerized)").eq("user_id",userId),
@@ -497,6 +545,28 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
     setCounts(c=>({...c,accessories:updated.length}));
     setAccForm({name:"",quantity:"1",notes:""});
     setShowAccForm(false);
+  }
+
+  // Update a stash thread's spool_count (delta) — persists to user_inventory.
+  async function updateStashSpools(rowId, delta){
+    setStash(s=>({...s, threads: s.threads.map(t=>
+      t.id===rowId ? {...t, spool_count: Math.max(0,(t.spool_count||0)+delta)} : t)}));
+    if(supabase){
+      const row=stash.threads.find(t=>t.id===rowId);
+      const next=Math.max(0,((row?.spool_count)||0)+delta);
+      const{error}=await supabase.from("user_inventory").update({spool_count:next}).eq("id",rowId);
+      if(error)console.error("spool_count update:",error.message);
+    }
+  }
+  // Set a stash thread's inventory_target — persists to user_inventory.
+  async function updateStashTarget(rowId, value){
+    const v=Math.max(0,parseInt(value)||0);
+    setStash(s=>({...s, threads: s.threads.map(t=>
+      t.id===rowId ? {...t, inventory_target:v} : t)}));
+    if(supabase){
+      const{error}=await supabase.from("user_inventory").update({inventory_target:v}).eq("id",rowId);
+      if(error)console.error("inventory_target update:",error.message);
+    }
   }
 
   function removeAccessory(id){
@@ -558,7 +628,7 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
   const allSections=[
     {key:"threads",label:"Threads",emoji:"🧵",minPlan:"free"},
     {key:"fabrics",label:"Fabrics",emoji:"◧",minPlan:"premium"},
-    {key:"machines",label:"Machines",emoji:"⚙️",minPlan:"free"},
+    {key:"machines",label:"Machines",emoji:"⚙️",minPlan:"basic"},
     {key:"rulers",label:"Rulers",emoji:"📐",minPlan:"premium"},
     {key:"dies",label:"AccuQuilt",emoji:"◈",minPlan:"premium"},
     {key:"feet",label:"Feet",emoji:"👟",minPlan:"premium"},
@@ -585,17 +655,32 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
         <h2>Your Stash</h2>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <span className="count-chip">{totalItems} items</span>
-          <button
-            onClick={()=>setShowReport(true)}
-            style={{
-              padding:"3px 10px",borderRadius:"var(--r-full)",
-              border:"1.5px solid var(--teal)",
-              background:"var(--teal-pale)",color:"var(--teal)",
-              fontSize:11,fontWeight:800,cursor:"pointer",
-              fontFamily:"Nunito, sans-serif"
-            }}>
-            📋 Insurance Report
-          </button>
+          {planPremium ? (
+            <button
+              onClick={()=>setShowReport(true)}
+              style={{
+                padding:"3px 10px",borderRadius:"var(--r-full)",
+                border:"1.5px solid var(--teal)",
+                background:"var(--teal-pale)",color:"var(--teal)",
+                fontSize:11,fontWeight:800,cursor:"pointer",
+                fontFamily:"Nunito, sans-serif"
+              }}>
+              📋 Insurance Report
+            </button>
+          ) : (
+            <button
+              disabled
+              title="Premium feature"
+              style={{
+                padding:"3px 10px",borderRadius:"var(--r-full)",
+                border:"1.5px solid var(--border-teal)",
+                background:"var(--linen)",color:"var(--muted)",
+                fontSize:11,fontWeight:800,cursor:"not-allowed",opacity:0.6,
+                fontFamily:"Nunito, sans-serif"
+              }}>
+              📋 Insurance Report 🔒
+            </button>
+          )}
         </div>
       </div>
 
@@ -629,13 +714,37 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
                 const th = item.thread_library;
                 if(!th) return null;
                 const hex = th.hex_color || "#CCC";
-                const spools = item.spool_count || 1;
+                const spools = item.spool_count || 0;
+                const target = item.inventory_target || 0;
+                const isLow = target > 0 && spools <= target;
                 return(
-                  <div key={i} className="thread-row" style={{borderBottom:"1px solid var(--border-teal)",paddingBottom:8,marginBottom:8}}>
-                    <div className="swatch" style={{background:hex}}/>
-                    <div>
-                      <div className="thread-name">{th.brand} {th.color_code} — {th.color_name}</div>
-                      <div className="muted">{th.fiber_type||""} · {spools} {spools===1?"spool":"spools"}</div>
+                  <div key={item.id||i} style={{borderBottom:"1px solid var(--border-teal)",paddingBottom:10,marginBottom:10}}>
+                    <div className="thread-row" style={{alignItems:"center"}}>
+                      <div className="swatch" style={{background:hex}}/>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div className="thread-name" style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                          {th.brand} {th.color_code} — {th.color_name}
+                          {isLow && <span style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".5px",color:"#fff",background:"#C0392B",padding:"2px 7px",borderRadius:10}}>Low</span>}
+                        </div>
+                        <div className="muted">{th.fiber_type||""} · {spools} {spools===1?"spool":"spools"}{target>0?` · target ${target}`:""}</div>
+                      </div>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8,flexWrap:"wrap"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:4}}>
+                        <button className="btn" style={{padding:"2px 10px",fontSize:16,lineHeight:1}} onClick={()=>updateStashSpools(item.id,-1)} disabled={spools<=0}>−</button>
+                        <span style={{minWidth:24,textAlign:"center",fontWeight:700}}>{spools}</span>
+                        <button className="btn" style={{padding:"2px 10px",fontSize:16,lineHeight:1}} onClick={()=>updateStashSpools(item.id,1)}>+</button>
+                      </div>
+                      <label style={{display:"flex",alignItems:"center",gap:4,fontSize:12,color:"var(--muted)",margin:0}}>
+                        Target
+                        <input type="number" min="0" className="input" style={{width:64,padding:"4px 6px"}} value={target} onChange={e=>updateStashTarget(item.id,e.target.value)}/>
+                      </label>
+                      {isLow && (
+                        <button className="btn" style={{fontSize:11,padding:"4px 10px",marginLeft:"auto"}}
+                          onClick={()=>addManualShoppingItem({brand:th.brand,color_code:th.color_code,color_name:th.color_name,hex_color:th.hex_color,fiber_type:th.fiber_type,weight:th.weight})}>
+                          + Shopping List
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -649,7 +758,7 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
                 <div style={{fontSize:28,marginBottom:8}}>🛒</div>
                 <div style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:700,color:"var(--teal)",marginBottom:8}}>Shopping List is a Basic feature</div>
                 <p className="muted" style={{fontSize:13,marginBottom:12}}>Upgrade to Basic to manage your shopping list.</p>
-                <button className="btn active" onClick={()=>window.location.href=window.location.origin}>Upgrade to Basic — $4.99/mo</button>
+                <button className="btn active" onClick={()=>window.location.href=window.location.origin}>Upgrade to Basic — {priceLabel("basic","monthly")} or {priceLabel("basic","annual")}</button>
               </div>
             ) : (
             <div className="card">
@@ -698,7 +807,7 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
             <div style={{fontSize:28,marginBottom:8}}>🛒</div>
             <div style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:700,color:"var(--teal)",marginBottom:8}}>Shopping List is a Basic feature</div>
             <p className="muted" style={{fontSize:13,marginBottom:12}}>Upgrade to Basic to manage your shopping list.</p>
-            <button className="btn active" onClick={()=>window.location.href=window.location.origin}>Upgrade to Basic — $4.99/mo</button>
+            <button className="btn active" onClick={()=>window.location.href=window.location.origin}>Upgrade to Basic — {priceLabel("basic","monthly")} or {priceLabel("basic","annual")}</button>
           </div>
         ) : (
           <div className="card">
@@ -2013,11 +2122,13 @@ function FeetBrowser({ supabase, userId }) {
 // UpgradePrompt — shown when a feature requires a higher plan
 // ─────────────────────────────────────────────────────────────
 function UpgradePrompt({ requiredPlan, feature, currentPlan, isGuest }) {
-  const prices = { basic: "$4.99/mo", premium: "$9.99/mo" };
+  const [cycle, setCycle] = useState("annual"); // "monthly" | "annual"
   const perks = {
-    basic: ["Unlimited thread stash", "Cross-reference tool", "Camera color match", "Barcode scanner", "Shopping lists", "Up to 10 projects"],
-    premium: ["Everything in Basic", "Fabric & accessory stash", "Unlimited projects", "Community Forum"],
+    basic: ["Unlimited thread stash", "Machine library", "Shopping lists", "Up to 5 projects", "Cross-reference", "Camera match", "Barcode scanner"],
+    premium: ["Everything in Basic", "Fabric & accessory stash", "Unlimited projects", "Community Forum", "CSV export", "Insurance reports"],
   };
+  const isPaid = requiredPlan === "basic" || requiredPlan === "premium";
+  const sav = isPaid ? annualSavings(requiredPlan) : null;
   return (
     <div className="card" style={{textAlign:"center",padding:"32px 24px"}}>
       <div style={{fontSize:36,marginBottom:10}}>🔒</div>
@@ -2029,14 +2140,40 @@ function UpgradePrompt({ requiredPlan, feature, currentPlan, isGuest }) {
           ? "Create a free account to get started, or upgrade for full access."
           : `You're on the ${currentPlan.charAt(0).toUpperCase()+currentPlan.slice(1)} plan. Upgrade to unlock this feature.`}
       </p>
-      <div style={{background:"var(--teal-pale)",borderRadius:10,padding:"14px 16px",marginBottom:20,textAlign:"left"}}>
-        <div style={{fontSize:12,fontWeight:700,color:"var(--teal)",marginBottom:8,textTransform:"uppercase",letterSpacing:1}}>
-          {requiredPlan === "basic" ? "Basic" : "Premium"} — {prices[requiredPlan]}
+
+      {isPaid && (
+        <div style={{display:"flex",justifyContent:"center",marginBottom:14}}>
+          <div style={{display:"inline-flex",background:"var(--warm-white)",border:"1.5px solid var(--border-teal)",borderRadius:"var(--r-full)",padding:3,gap:2}}>
+            {[["monthly","Monthly"],["annual","Annual"]].map(([key,label])=>(
+              <button key={key} onClick={()=>setCycle(key)}
+                style={{
+                  padding:"5px 16px",borderRadius:"var(--r-full)",border:"none",cursor:"pointer",
+                  fontFamily:"Nunito,sans-serif",fontSize:12,fontWeight:700,
+                  background:cycle===key?"var(--teal)":"transparent",
+                  color:cycle===key?"#fff":"var(--muted)",transition:"all .15s"
+                }}>
+                {label}{key==="annual"&&sav?` · save ${sav.pct}%`:""}
+              </button>
+            ))}
+          </div>
         </div>
-        {perks[requiredPlan].map((p,i)=>(
-          <div key={i} style={{fontSize:13,color:"var(--ink)",padding:"3px 0"}}>✓ &nbsp;{p}</div>
-        ))}
-      </div>
+      )}
+
+      {isPaid && (
+        <div style={{background:"var(--teal-pale)",borderRadius:10,padding:"14px 16px",marginBottom:20,textAlign:"left"}}>
+          <div style={{fontSize:12,fontWeight:700,color:"var(--teal)",marginBottom:2,textTransform:"uppercase",letterSpacing:1}}>
+            {requiredPlan === "basic" ? "Basic" : "Premium"} — {priceLabel(requiredPlan,cycle)}
+          </div>
+          <div style={{fontSize:11,color:"var(--muted)",marginBottom:10}}>
+            {cycle==="annual"
+              ? (sav?`Save ${fmtPrice(sav.amount)} vs monthly`:"Billed yearly")
+              : `or ${priceLabel(requiredPlan,"annual")} billed yearly`}
+          </div>
+          {perks[requiredPlan].map((p,i)=>(
+            <div key={i} style={{fontSize:13,color:"var(--ink)",padding:"3px 0"}}>✓ &nbsp;{p}</div>
+          ))}
+        </div>
+      )}
       <button
         className="btn active"
         onClick={()=>{ window.location.href = window.location.origin; }}
@@ -3017,7 +3154,7 @@ function BarcodeScanner({ supabase, userId, onAddToStash, onColorMatch }) {
     setAdding(true);
     try{
       const{data:lib}=await supabase.from("thread_library").select("id").eq("color_code",result.thread.color_code).maybeSingle();
-      if(lib){await supabase.from("user_inventory").upsert({user_id:userId,thread_id:lib.id,quantity:1},{onConflict:"user_id,thread_id"});}
+      if(lib){await supabase.from("user_inventory").upsert({user_id:userId,thread_id:lib.id,spool_count:1},{onConflict:"user_id,thread_id"});}
       onAddToStash&&onAddToStash(result.thread);setResult(null);
     }catch(e){console.error(e);}
     setAdding(false);
@@ -3495,6 +3632,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
 
   // ── State ─────────────────────────────────────────────────
   const [tab, setTab]                 = useState("home");
+  const [showGame, setShowGame]       = useState(false);
   const [subTab, setSubTab]           = useState("thread"); // match sub-tabs
   const [moreSubTab, setMoreSubTab]   = useState("machines");
   const [threads, setThreads]         = useState(starterThreads);
@@ -3505,7 +3643,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
   const [fabricBrandFilter, setFabricBrandFilter] = useState("All");
   const [form, setForm]               = useState(emptyForm);
   const [message, setMessage]         = useState("");
-  const [settings, setSettings]       = useState(()=>{ const saved=localStorage.getItem("hh_settings"); const base={showBarcodes:true,showWeights:true,autoAddZeroInventoryToShoppingList:true,defaultMatchMode:"thread",defaultBrand:"Isacord",crossRefBrand:"",showValuesInReports:false,quickActions:DEFAULT_QUICK_ACTIONS}; return saved?{...base,...JSON.parse(saved)}:base; });
+  const [settings, setSettings]       = useState(()=>{ const saved=localStorage.getItem("hh_settings"); const base={showBarcodes:true,showWeights:true,autoAddZeroInventoryToShoppingList:true,defaultMatchMode:"thread",defaultBrand:"Isacord",crossRefBrand:"",showValuesInReports:false,defaultInventoryTarget:0,quickActions:DEFAULT_QUICK_ACTIONS}; return saved?{...base,...JSON.parse(saved)}:base; });
   const [syncMeta, setSyncMeta]       = useState({ appVersion:APP_VERSION,libraryVersion:"1.0.0",remoteLibraryVersion:"1.0.0",status:"Ready",lastSynced:"Never",hasUpdate:false });
   const [lang, setLang]               = useState(()=>localStorage.getItem("hh_lang")||"en-US");
   useEffect(()=>{localStorage.setItem("hh_lang",lang);},[lang]);
@@ -3522,6 +3660,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
   const [pendingBarcode, setPendingBarcode]   = useState(null);
   const [showAddThread, setShowAddThread]     = useState(false);
   const [editQuickActions, setEditQuickActions] = useState(false);
+  const [billingCycle, setBillingCycle] = useState("annual"); // "monthly" | "annual" — drives upgrade UI pricing display
 
   // Shopping / projects
   const [shoppingList, setShoppingList]                   = useState([]);
@@ -3632,6 +3771,50 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
     });
     return Array.from(map.values());
   },[autoShoppingItems,shoppingList]);
+
+  // ── Notifications ─────────────────────────────────────────
+  // Notifications are now generated SERVER-SIDE (the generate-notifications
+  // Edge Function, on a cron) and stored in the `notifications` table. The app
+  // just READS them and marks them read — so read-state syncs across devices and
+  // the feed reflects activity that happened while the app was closed. This is
+  // the row a push payload will point at once the Capacitor wrap lands.
+  const [rawNotifs, setRawNotifs] = useState([]); // rows from `notifications`
+  const [dismissedIds, setDismissedIds] = useState([]); // session-only local hide
+  const [showNotifs, setShowNotifs] = useState(false);
+
+  const loadNotifications = useCallback(async()=>{
+    if(!supabase||!userId||isGuest){ setRawNotifs([]); return; }
+    const{data,error}=await supabase
+      .from("notifications")
+      .select("id,type,title,body,icon,dest_tab,dest_sub,is_read,created_at")
+      .eq("user_id",userId)
+      .order("created_at",{ascending:false})
+      .limit(50);
+    // If the table isn't there yet (migration not run), fail quietly.
+    if(error){ if(error.code!=="42P01") console.error("notifications load:",error.message); setRawNotifs([]); return; }
+    setRawNotifs(data||[]);
+  },[supabase,userId,isGuest]);
+
+  useEffect(()=>{ loadNotifications(); },[loadNotifications, tab]);
+
+  // Visible = not locally hidden this session; unread = not read on the server.
+  const visibleNotifs = useMemo(()=>rawNotifs.filter(n=>!dismissedIds.includes(n.id)),[rawNotifs,dismissedIds]);
+  const unreadCount = useMemo(()=>visibleNotifs.filter(n=>!n.is_read).length,[visibleNotifs]);
+
+  // Mark all visible as read on the server (and optimistically in state).
+  const markAllRead = useCallback(async()=>{
+    const unread=visibleNotifs.filter(n=>!n.is_read).map(n=>n.id);
+    if(!unread.length||!supabase) return;
+    setRawNotifs(prev=>prev.map(n=>unread.includes(n.id)?{...n,is_read:true}:n));
+    const{error}=await supabase.from("notifications")
+      .update({is_read:true,read_at:new Date().toISOString()})
+      .in("id",unread);
+    if(error) console.error("mark read:",error.message);
+  },[visibleNotifs,supabase]);
+
+  // Dismiss = hide locally for this session. (Users can't delete server rows;
+  // the generator removes them once the underlying condition resolves.)
+  const dismissNotif = id=>setDismissedIds(prev=>[...new Set([...prev,id])]);
 
   const selectedProject = useMemo(()=>projects.find(p=>p.id===selectedProjectId)||projects[0],[projects,selectedProjectId]);
 
@@ -3801,8 +3984,15 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
     }));
     setMessage(`${brand} ${code} — ${name} added to "${projects.find(p=>p.id===selectedProjectId)?.name||"project"}"!`);
   };
+  const PROJECT_LIMIT = isPremium ? Infinity : isBasic ? 5 : 1; // Free 1 · Basic 5 · Premium unlimited
   const createProject=()=>{
     if(!newProjectForm.name.trim()){setMessage("Please enter a project name.");return;}
+    if(projects.length>=PROJECT_LIMIT){
+      setMessage(isFree
+        ? "⚠ Free plan includes 1 project. Upgrade to Basic for 5, or Premium for unlimited."
+        : "⚠ Basic plan includes 5 projects. Upgrade to Premium for unlimited.");
+      return;
+    }
     const id=`proj-${Date.now()}`;
     setProjects(c=>[...c,{id,...newProjectForm,requiredThreads:[]}]);
     setSelectedProjectId(id);setNewProjectForm(emptyProject);setShowNewProject(false);
@@ -3918,7 +4108,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
         // Store directly in user_inventory using thread_library_all id
         // Single thread_library table — thread.id is always the FK
         const{error}=await supabase.from("user_inventory")
-          .upsert({user_id:userId,thread_id:thread.id,spool_count:1},{onConflict:"user_id,thread_id"});
+          .upsert({user_id:userId,thread_id:thread.id,spool_count:1,inventory_target:settings.defaultInventoryTarget||0},{onConflict:"user_id,thread_id"});
         if(error){
           console.error("user_inventory upsert error:",error.message);
           saveThreadToLocalStash(thread);
@@ -4310,6 +4500,27 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
           </div>
         )}
 
+        {/* ── Closest fabrics (thread → fabric cross-reference) ── */}
+        {supaFabrics.length>0&&(isAllBrandsRow||isSupaThread)&&(()=>{
+          const nearestFabrics=findNearestN(thread,supaFabrics,3);
+          if(!nearestFabrics.length) return null;
+          return(
+            <div style={{marginTop:10,padding:"10px 12px",background:"var(--teal-pale)",border:"1.5px solid var(--border-teal)",borderRadius:"var(--r-sm)"}}>
+              <div style={{fontSize:12,fontWeight:700,color:"var(--teal)",marginBottom:8}}>Closest fabrics</div>
+              {nearestFabrics.map(fab=>(
+                <div key={fab.id} style={{display:"flex",alignItems:"center",gap:10,marginTop:6,padding:"8px 10px",background:"var(--warm-white)",border:"1.5px solid var(--border-teal)",borderRadius:"var(--r-sm)"}}>
+                  <div style={{width:28,height:28,borderRadius:"50%",flexShrink:0,background:fab.hex_color||"#ccc",border:"2px solid rgba(255,255,255,0.6)",boxShadow:"0 2px 6px rgba(0,0,0,0.18)"}}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontWeight:700,fontSize:13,color:"var(--ink)"}}>{fab.color_code?`${fab.color_code} — `:""}{fab.color_name}</div>
+                    <div style={{fontSize:11,color:"var(--muted)"}}>{fab.brand}{fab.nearest_kona_name?` · ~${fab.nearest_kona_name}`:""}</div>
+                  </div>
+                  <button className="btn active" style={{fontSize:11,padding:"5px 10px",flexShrink:0}} onClick={()=>addFabricToInventory&&addFabricToInventory(fab)}>+ Add</button>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+
         {/* Actions */}
         <div className="button-row">
           <button className="btn active" onClick={()=>addToUserInventory(thread)}>+ Add to Stash</button>
@@ -4336,7 +4547,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
 
   return(
     <div className="app-shell">
-      <header className="hero card dark">
+      <header className="hero card dark" style={{position:"relative",zIndex:30}}>
         <div className="hero-inner">
           <img src="/HH_Logo.png" alt="Haberdash Haven Logo" className="hero-logo" />
           <div className="hero-text">
@@ -4344,11 +4555,82 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
             <div className="tagline">Making the world a better place. One stitch at a time...</div>
           </div>
         </div>
-        <div className="hero-bar"></div>
+
+        {/* Notification bell — signed-in users only */}
+        {user && !isGuest && (
+          <div style={{position:"absolute",top:12,right:12,zIndex:20}}>
+            <button
+              onClick={()=>{ setShowNotifs(v=>!v); if(!showNotifs) markAllRead(); }}
+              aria-label="Notifications"
+              style={{
+                position:"relative",background:"rgba(255,255,255,0.12)",border:"none",
+                borderRadius:"50%",width:38,height:38,cursor:"pointer",fontSize:18,
+                display:"flex",alignItems:"center",justifyContent:"center",color:"#fff"
+              }}>
+              🔔
+              {unreadCount>0 && (
+                <span style={{
+                  position:"absolute",top:-2,right:-2,minWidth:18,height:18,padding:"0 5px",
+                  background:"var(--sun-gold)",color:"var(--ink)",borderRadius:"var(--r-full)",
+                  fontSize:10,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",
+                  border:"2px solid var(--teal)"
+                }}>{unreadCount>9?"9+":unreadCount}</span>
+              )}
+            </button>
+
+            {showNotifs && (
+              <>
+                {/* Backdrop — tap anywhere to close. Captures clicks so nothing behind reacts. */}
+                <div
+                  onClick={()=>setShowNotifs(false)}
+                  style={{position:"fixed",inset:0,zIndex:999,background:"rgba(0,0,0,0.15)"}}
+                />
+                <div style={{
+                  position:"fixed",top:64,right:12,width:300,maxWidth:"86vw",zIndex:1000,
+                  background:"var(--warm-white)",border:"1.5px solid var(--border-teal)",
+                  borderRadius:"var(--r-md)",boxShadow:"0 8px 28px rgba(0,0,0,0.22)",
+                  overflow:"hidden",textAlign:"left"
+                }}
+                  onClick={e=>e.stopPropagation()}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+                    padding:"10px 14px",borderBottom:"1px solid var(--border-teal)",background:"var(--teal-pale)"}}>
+                    <span style={{fontWeight:800,fontSize:13,color:"var(--teal)"}}>Notifications</span>
+                    <span style={{fontSize:16,cursor:"pointer",color:"var(--muted)"}} onClick={()=>setShowNotifs(false)}>✕</span>
+                  </div>
+
+                  {visibleNotifs.length===0 ? (
+                    <div style={{padding:"22px 16px",textAlign:"center"}}>
+                      <div style={{fontSize:26,marginBottom:6}}>✨</div>
+                      <p className="muted" style={{fontSize:13,margin:0}}>You're all caught up.</p>
+                    </div>
+                  ) : (
+                    <div style={{maxHeight:320,overflowY:"auto"}}>
+                      {visibleNotifs.map(n=>(
+                        <div key={n.id} style={{display:"flex",gap:10,padding:"11px 14px",
+                          borderBottom:"1px solid var(--teal-pale)",alignItems:"flex-start"}}>
+                          <div style={{fontSize:18,flexShrink:0,lineHeight:1.2}}>{n.icon}</div>
+                          <div style={{flex:1,minWidth:0,cursor:"pointer"}}
+                            onClick={()=>{ if(n.dest_tab){ setTab(n.dest_tab); if(n.dest_sub) setMoreSubTab(n.dest_sub); } setShowNotifs(false); }}>
+                            <div style={{fontWeight:700,fontSize:13,color:"var(--ink)"}}>{n.title}</div>
+                            {n.body&&<div style={{fontSize:12,color:"var(--muted)",marginTop:1}}>{n.body}</div>}
+                          </div>
+                          <span title="Dismiss" style={{fontSize:13,cursor:"pointer",color:"var(--subtle)",flexShrink:0}}
+                            onClick={()=>dismissNotif(n.id)}>✕</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        <div className="hero-bar" style={{pointerEvents:"none"}}></div>
       </header>
 
       {/* ── 4-tab main nav ── */}
-      <nav className="nav-row main-nav">
+      <nav className="nav-row main-nav" style={{position:"relative",zIndex:1}}>
         {mainTabs.map(([key,label])=>(
           <button key={key} className={`btn ${tab===key?"active":""}`}
             onClick={()=>setTab(key)}
@@ -4379,6 +4661,17 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
               lists so you never buy a duplicate spool again.
             </p>
           </div>
+
+          {/* Spool Quest — a little fun on the home tab */}
+          <div className="card" style={{background:"linear-gradient(135deg,var(--sun-wash),var(--linen))",border:"1.5px solid var(--border-sun)",display:"flex",alignItems:"center",gap:14}}>
+            <div style={{fontSize:34,flexShrink:0}}>🧵</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:800,color:"var(--teal)"}}>Spool Quest</div>
+              <div style={{fontSize:12,color:"var(--muted)"}}>Rescue your quilt before the Bee deadline. A quick coffee-break game.</div>
+            </div>
+            <button className="btn active" style={{flexShrink:0,fontWeight:700}} onClick={()=>setShowGame(true)}>Play</button>
+          </div>
+
           <div className="card">
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <h2 style={{margin:0}}>Quick Actions</h2>
@@ -4439,20 +4732,47 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
           {/* Upgrade prompt on home for free/guest users */}
           {(!user || isGuest || userPlan === "free") && (
             <div className="card" style={{background:"linear-gradient(135deg,var(--teal-pale),var(--linen))",border:"1.5px solid var(--border-teal)"}}>
-              <div style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:700,color:"var(--teal)",marginBottom:8}}>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:700,color:"var(--teal)",marginBottom:10}}>
                 Unlock the Full Haven ✦
               </div>
+
+              {/* Monthly / Annual toggle */}
+              <div style={{display:"flex",justifyContent:"center",marginBottom:12}}>
+                <div style={{display:"inline-flex",background:"var(--warm-white)",border:"1.5px solid var(--border-teal)",borderRadius:"var(--r-full)",padding:3,gap:2}}>
+                  {[["monthly","Monthly"],["annual","Annual"]].map(([key,label])=>(
+                    <button key={key} onClick={()=>setBillingCycle(key)}
+                      style={{
+                        padding:"5px 16px",borderRadius:"var(--r-full)",border:"none",cursor:"pointer",
+                        fontFamily:"Nunito,sans-serif",fontSize:12,fontWeight:700,
+                        background:billingCycle===key?"var(--teal)":"transparent",
+                        color:billingCycle===key?"#fff":"var(--muted)",
+                        transition:"all .15s"
+                      }}>
+                      {label}{key==="annual"?" · save ~17%":""}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
                 {[
-                  {plan:"Basic",price:"$4.99/mo",perks:["Unlimited thread stash","Cross-reference","Camera match","Shopping lists","10 projects"],color:"var(--teal)"},
-                  {plan:"Premium",price:"$9.99/mo",perks:["Everything in Basic","Fabric & accessories","Unlimited projects","Community Forum"],color:"#1A5276"},
-                ].map(({plan,price,perks,color})=>(
+                  {plan:"Basic",planKey:"basic",perks:["Unlimited thread stash","Machine library","Shopping lists","5 projects"],color:"var(--teal)"},
+                  {plan:"Premium",planKey:"premium",perks:["Everything in Basic","Fabric & accessories","Unlimited projects","Community Forum","CSV export & insurance reports"],color:"#1A5276"},
+                ].map(({plan,planKey,perks,color})=>{
+                  const sav=annualSavings(planKey);
+                  return(
                   <div key={plan} style={{background:"#fff",borderRadius:10,padding:"12px",border:`1.5px solid ${color}`}}>
                     <div style={{fontWeight:700,color,fontSize:14,marginBottom:2}}>{plan}</div>
-                    <div style={{fontSize:12,color:"var(--muted)",marginBottom:8}}>{price}</div>
+                    <div style={{fontSize:14,fontWeight:800,color:"var(--ink)"}}>{priceLabel(planKey,billingCycle)}</div>
+                    <div style={{fontSize:11,color:"var(--muted)",marginBottom:8,minHeight:14}}>
+                      {billingCycle==="annual"
+                        ? (sav?`Save ${fmtPrice(sav.amount)}/yr`:"Billed yearly")
+                        : `or ${priceLabel(planKey,"annual")} billed yearly`}
+                    </div>
                     {perks.map((p,i)=><div key={i} style={{fontSize:11,color:"var(--ink)",padding:"1px 0"}}>✓ {p}</div>)}
                   </div>
-                ))}
+                  );
+                })}
               </div>
               <button className="btn active" style={{width:"100%"}} onClick={()=>window.location.href=window.location.origin}>
                 {!user||isGuest ? "Create Account — Free" : "Upgrade Now"}
@@ -4481,34 +4801,6 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
             <>
               <div className="card">
                 <h2>Thread Match</h2>
-                {/* Status bar — shows load state and count */}
-                <div style={{
-                  marginBottom:12, padding:"7px 12px",
-                  borderRadius:"var(--r-sm)",
-                  fontSize:12, fontWeight:600,
-                  background: threadLoadStatus==="ok-all" ? "var(--leaf-light)"
-                            : threadLoadStatus.startsWith("ok-") ? "var(--sun-pale)"
-                            : threadLoadStatus==="loading" ? "var(--sky-pale)"
-                            : threadLoadStatus==="local" ? "#FDECEA"
-                            : "var(--teal-pale)",
-                  color: threadLoadStatus==="ok-all" ? "var(--leaf)"
-                       : threadLoadStatus.startsWith("ok-") ? "var(--sun-amber)"
-                       : threadLoadStatus==="loading" ? "var(--sky-cobalt)"
-                       : threadLoadStatus==="local" ? "#C0392B"
-                       : "var(--teal)",
-                  border:"1px solid",
-                  borderColor: threadLoadStatus==="ok-all" ? "var(--leaf-light)"
-                             : threadLoadStatus.startsWith("ok-") ? "var(--border-sun)"
-                             : threadLoadStatus==="loading" ? "var(--sky-pale)"
-                             : "#FDECEA",
-                }}>
-                  {threadLoadStatus==="loading" && "⏳ Loading threads…"}
-                  {threadLoadStatus==="ok" && `✓ ${supaAllThreads.length.toLocaleString()} thread colors across all brands`}
-                  {threadLoadStatus==="error" && "⚠ Could not load threads — check RLS policy on thread_library table in Supabase."}
-                  {threadLoadStatus==="empty" && "⚠ No thread data found — run the SQL data load steps in Supabase."}
-                  {threadLoadStatus==="no-db" && "⚠ No database connection."}
-                </div>
-
                 <label>Thread Brand
                   {!user&&<span style={{fontSize:11,color:"var(--sky-cobalt)",marginLeft:6,fontWeight:600}}>
                     (Sign in to access all 26 brands)
@@ -4525,7 +4817,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
                 <label>{t("match_color_family",lang)}
                   <select className="input" value={colorFamilyKey} onChange={e=>setColorFamilyKey(e.target.value)}>
                     {COLOR_FAMILY_KEYS.map((key,i)=>(
-                      <option key={key} value={key}>{getColorFamilies(lang)[i]}</option>
+                      <option key={key} value={key}>{key==="All"?"Color Families":getColorFamilies(lang)[i]}</option>
                     ))}
                   </select>
                 </label>
@@ -4717,8 +5009,8 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
                 </label>
                 <label>Color Family
                   <select className="input" value={colorFamilyKey} onChange={e=>setColorFamilyKey(e.target.value)}>
-                    <option value="All">All families</option>
-                    {COLOR_FAMILY_KEYS.map(k=><option key={k} value={k}>{k}</option>)}
+                    <option value="All">Color Families</option>
+                    {COLOR_FAMILY_KEYS.filter(k=>k!=="All").map(k=><option key={k} value={k}>{k}</option>)}
                   </select>
                 </label>
                 <label>Search<input className="input" value={matchQuery} onChange={e=>setMatchQuery(e.target.value)} placeholder="Color name, code, brand, Kona match…"/></label>
@@ -4822,7 +5114,11 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
             ))}
           </div>
 
-          {moreSubTab==="machines"&&(supabase?<MachinesBrowser supabase={supabase} userId={userId}/>:<div className="card"><p className="muted">Connect to Supabase to browse machines.</p></div>)}
+          {moreSubTab==="machines"&&(
+            (!user||isGuest||!canAccess("basic"))
+              ?<UpgradePrompt requiredPlan="basic" feature="Machine Library" currentPlan={userPlan} isGuest={isGuest||!user}/>
+              :supabase?<MachinesBrowser supabase={supabase} userId={userId}/>:<div className="card"><p className="muted">Connect to Supabase to browse machines.</p></div>
+          )}
           {moreSubTab==="accuquilt"&&(supabase?<AccuQuiltBrowser supabase={supabase} userId={userId}/>:<div className="card"><p className="muted">Connect to Supabase to browse AccuQuilt.</p></div>)}
           {moreSubTab==="feet"&&(supabase?<FeetBrowser supabase={supabase} userId={userId}/>:<div className="card"><p className="muted">Connect to Supabase to browse presser feet.</p></div>)}
           {moreSubTab==="rulers"&&(supabase?<RulerBrowser supabase={supabase} userId={userId}/>:<div className="card"><p className="muted">Connect to Supabase to browse rulers.</p></div>)}
@@ -4836,13 +5132,44 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
 
           {moreSubTab==="help"&&(
             <div className="card">
-              <h2>Help</h2>
-              <p><b>Match → Thread:</b> Pick a brand, pick a color family, or type to search. All 4,000+ thread colors across every brand are searchable. Every result has + Add to Stash, Add to Project, and Shopping List buttons.</p>
-              <p style={{marginTop:8}}><b>Match → Camera:</b> Photo a fabric or thread, tap the color, get the 5 closest matches.</p>
-              <p style={{marginTop:8}}><b>Match → Barcode:</b> Scan any thread spool. Found = instant add to stash. Not found = identify by camera, barcode saved for everyone.</p>
-              <p style={{marginTop:8}}><b>Stash:</b> Everything you own in one place — threads, rulers, machines, AccuQuilt dies, feet, and accessories.</p>
-              <p style={{marginTop:8}}><b>More → Machines/AccuQuilt/Feet/Rulers:</b> Browse the full libraries and tap + Add to track what you own.</p>
-              <p style={{marginTop:8}}><b>More → Projects:</b> Create projects and build required thread lists.</p>
+              <h2>Help &amp; Guide</h2>
+              <p className="muted" style={{fontSize:13,marginTop:-4,marginBottom:14}}>
+                Everything Haberdash Haven can do, tab by tab. Tap any feature in the app to try it as you read.
+              </p>
+
+              {/* MATCH */}
+              <div style={{fontSize:12,fontWeight:800,color:"var(--sun-amber)",textTransform:"uppercase",letterSpacing:".6px",margin:"4px 0 8px"}}>Match</div>
+              <p><b>🔍 Thread:</b> Pick a brand, choose a color family, or type to search across every thread color in the library. Each result shows the color details, the closest equivalent in any other thread brand, and now the <b>closest fabrics</b> too — plus + Add to Stash, Add to Project, and Shopping List.</p>
+              <p style={{marginTop:8}}><b>⇄ Cross-Ref:</b> Convert a color between any two thread brands. Pick a source brand and color, pick the brand you want the equivalent in, and get the nearest match by color distance.</p>
+              <p style={{marginTop:8}}><b>🎨 Color Wheel:</b> Explore color harmonies — complementary, analogous, triadic, split-complementary, tetradic, and monochromatic. Each color in the palette matches to real threads and fabrics you can add straight to your stash or project.</p>
+              <p style={{marginTop:8}}><b>📷 Camera:</b> Snap a photo of a fabric or thread, tap any color in the image, and get the closest matches. Works on prints and solids — it averages a small area around your tap for accuracy.</p>
+              <p style={{marginTop:8}}><b>◈ Fabric:</b> Search solid fabrics by brand or color. Each fabric card shows its nearest matching thread and the closest equivalent in another fabric brand. <span className="muted">(Fabric stash is a Premium feature.)</span></p>
+              <p style={{marginTop:8}}><b>▦ Barcode:</b> Scan any thread spool. A known barcode adds it to your stash instantly; an unknown one lets you identify it by camera, then saves that barcode for everyone.</p>
+
+              {/* STASH */}
+              <div style={{fontSize:12,fontWeight:800,color:"var(--sun-amber)",textTransform:"uppercase",letterSpacing:".6px",margin:"16px 0 8px"}}>Stash &amp; Shopping</div>
+              <p><b>Stash:</b> Everything you own in one place — threads (free), machines (Basic), plus fabrics, rulers, AccuQuilt dies, presser feet, and accessories (Premium). Set inventory targets and deduct as you use supplies.</p>
+              <p style={{marginTop:8}}><b>Shopping List:</b> Appears once it has items. Threads and fabrics you search for but don't own can be added with one tap, and you can add manual items like batting or backing fabric too.</p>
+
+              {/* PROJECTS */}
+              <div style={{fontSize:12,fontWeight:800,color:"var(--sun-amber)",textTransform:"uppercase",letterSpacing:".6px",margin:"16px 0 8px"}}>Projects</div>
+              <p><b>Projects:</b> Create a project, build its required thread and fabric lists, track status, and keep a journal and notes as you stitch. <span className="muted">(Free includes 1 project · Basic includes 5 · Premium is unlimited.)</span></p>
+
+              {/* MORE */}
+              <div style={{fontSize:12,fontWeight:800,color:"var(--sun-amber)",textTransform:"uppercase",letterSpacing:".6px",margin:"16px 0 8px"}}>More</div>
+              <p><b>Machine Library:</b> Browse the full reference library of 77 machines and tap + Add to track what you own; attach photos too. <span className="muted">(Basic feature.)</span></p>
+              <p style={{marginTop:8}}><b>AccuQuilt / Feet / Rulers:</b> Browse the libraries and add items to your stash. <span className="muted">(Premium stash.)</span></p>
+              <p style={{marginTop:8}}><b>Insurance Report:</b> Generate a printable report of your stash for insurance purposes, with optional purchase price and estimated value. <span className="muted">(Premium feature.)</span></p>
+              <p style={{marginTop:8}}><b>Community Forum:</b> Share tips, ask questions, and post project reviews with other stitchers. <span className="muted">(Premium feature.)</span></p>
+              <p style={{marginTop:8}}><b>Settings:</b> Set your default brand and preferred cross-reference brand, default inventory target, language, and barcode/weight display. CSV export of your full stash lives here too. <span className="muted">(CSV export is a Premium feature.)</span></p>
+
+              {/* EXTRAS */}
+              <div style={{fontSize:12,fontWeight:800,color:"var(--sun-amber)",textTransform:"uppercase",letterSpacing:".6px",margin:"16px 0 8px"}}>Just for fun</div>
+              <p><b>🧵 Spool Quest:</b> A quick coffee-break game on your Home screen — rescue your quilt before the Bee deadline.</p>
+
+              <p className="muted" style={{fontSize:12,marginTop:16}}>
+                Beta build {APP_VERSION} — thanks for testing! Spot a bug or have an idea? Let us know.
+              </p>
             </div>
           )}
 
@@ -4910,6 +5237,12 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
                   Enables purchase price &amp; estimated value fields on insurance printouts.
                 </span>
               </label>
+              <label>Default Inventory Target
+                <input type="number" min="0" className="input" style={{maxWidth:120}}
+                  value={settings.defaultInventoryTarget??0}
+                  onChange={e=>setSettings({...settings,defaultInventoryTarget:Math.max(0,parseInt(e.target.value)||0)})}/>
+                <span className="muted" style={{fontSize:12,marginTop:-8,display:"block"}}>New threads added to your stash start with this target. Set to 0 for no target. You can adjust each thread individually in your stash.</span>
+              </label>
               <label>Default Thread Brand
                 <select className="input" value={settings.defaultBrand||"Isacord"} onChange={e=>{setSettings({...settings,defaultBrand:e.target.value});setMatchBrand(e.target.value);}}>
                   {threadBrands.map(([label])=><option key={label}>{label}</option>)}
@@ -4949,14 +5282,28 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
                 <p className="muted" style={{fontSize:12,marginBottom:10}}>
                   Downloads a .csv file with all your threads, rulers, machines, AccuQuilt dies, presser feet, and accessories. Open in Excel, Google Sheets, or Numbers.
                 </p>
-                <button className="btn active" style={{width:"100%"}} onClick={exportStash}>
-                  ⬇ Export Stash as CSV
-                </button>
+                {isPremium ? (
+                  <button className="btn active" style={{width:"100%"}} onClick={exportStash}>
+                    ⬇ Export Stash as CSV
+                  </button>
+                ) : (
+                  <>
+                    <button className="btn" style={{width:"100%",opacity:0.55,cursor:"not-allowed"}} disabled
+                      title="Premium feature">
+                      ⬇ Export Stash as CSV 🔒
+                    </button>
+                    <p className="muted" style={{fontSize:12,marginTop:8}}>
+                      CSV export is a Premium feature. Upgrade to download your full stash.
+                    </p>
+                  </>
+                )}
               </div>
             </div>
           )}
         </>
       )}
+
+      {showGame && <SpoolQuest onClose={()=>setShowGame(false)} />}
     </div>
   );
 }
