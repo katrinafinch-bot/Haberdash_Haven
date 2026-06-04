@@ -1799,6 +1799,10 @@ function RulerBrowser({ supabase, userId }) {
   const [owned,setOwned]=useState({});
   const [loading,setLoading]=useState(true);
   const [search,setSearch]=useState("");
+  const [showForm,setShowForm]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const blankForm={brand:"",name:"",category:"",size:"",sku:"",notes:""};
+  const [form,setForm]=useState(blankForm);
   useEffect(()=>{ if(!supabase)return; fetchRulers(); if(userId)fetchOwned(); },[supabase,userId]);
   async function fetchRulers(){ setLoading(true); const{data}=await supabase.from("ruler_library").select("*").order("brand").order("name"); setRulers(data||[]); setLoading(false); }
   async function fetchOwned(){ const{data}=await supabase.from("user_rulers").select("ruler_id").eq("user_id",userId); if(data){const m={};data.forEach(r=>{m[r.ruler_id]=true;});setOwned(m);} }
@@ -1806,6 +1810,37 @@ function RulerBrowser({ supabase, userId }) {
     if(!userId||!supabase)return;
     if(owned[rulerId]){ await supabase.from("user_rulers").delete().eq("user_id",userId).eq("ruler_id",rulerId); setOwned(prev=>{const n={...prev};delete n[rulerId];return n;}); }
     else{ await supabase.from("user_rulers").upsert({user_id:userId,ruler_id:rulerId,quantity:1},{onConflict:"user_id,ruler_id"}); setOwned(prev=>({...prev,[rulerId]:true})); }
+  }
+  async function addCustomRuler(){
+    if(!userId||!supabase)return;
+    if(!form.name.trim()){ alert("Give your ruler a name."); return; }
+    setSaving(true);
+    const row={
+      brand:form.brand.trim()||"Custom",
+      name:form.name.trim(),
+      category:form.category.trim()||null,
+      size:form.size.trim()||null,
+      sku:form.sku.trim()||null,
+      notes:form.notes.trim()||null,
+      created_by:userId,
+    };
+    const{data,error}=await supabase.from("ruler_library").insert(row).select().single();
+    setSaving(false);
+    if(error){ alert("Couldn't save: "+error.message); return; }
+    setRulers(prev=>[...prev,data]);
+    // auto-add the new custom ruler to the user's stash
+    await supabase.from("user_rulers").upsert({user_id:userId,ruler_id:data.id,quantity:1},{onConflict:"user_id,ruler_id"});
+    setOwned(prev=>({...prev,[data.id]:true}));
+    setForm(blankForm); setShowForm(false);
+  }
+  async function deleteCustomRuler(rulerId){
+    if(!userId||!supabase)return;
+    if(!confirm("Delete this custom ruler? It'll be removed from your stash too.")) return;
+    await supabase.from("user_rulers").delete().eq("user_id",userId).eq("ruler_id",rulerId);
+    const{error}=await supabase.from("ruler_library").delete().eq("id",rulerId).eq("created_by",userId);
+    if(error){ alert("Couldn't delete: "+error.message); return; }
+    setRulers(prev=>prev.filter(r=>r.id!==rulerId));
+    setOwned(prev=>{const n={...prev};delete n[rulerId];return n;});
   }
   const filtered=rulers.filter(r=>!search||normalized(r.brand).includes(normalized(search))||normalized(r.name).includes(normalized(search))||normalized(r.category).includes(normalized(search)));
   if(loading)return<div className="card"><p className="muted">Loading ruler library…</p></div>;
@@ -1815,18 +1850,37 @@ function RulerBrowser({ supabase, userId }) {
         <h2 style={{marginBottom:10}}>Ruler Library ({rulers.length})</h2>
         <input className="input" placeholder="Search brand, shape…" value={search} onChange={e=>setSearch(e.target.value)}/>
       </div>
-      <div className="card" style={{padding:"8px 12px"}}><p className="muted">{filtered.length} rulers — tap to add to your stash</p></div>
+      <div className="card" style={{padding:"8px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+        <p className="muted" style={{margin:0}}>{filtered.length} rulers — tap to add to your stash</p>
+        {userId&&<button className="btn" style={{flexShrink:0}} onClick={()=>setShowForm(s=>!s)}>{showForm?"Cancel":"+ Add my own"}</button>}
+      </div>
+      {showForm&&userId&&(
+        <div className="card" style={{padding:"12px 16px"}}>
+          <div className="thread-name" style={{marginBottom:8}}>Add a custom ruler</div>
+          <input className="input" style={{marginBottom:8}} placeholder="Name (required) — e.g. 8&quot; Arc" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/>
+          <input className="input" style={{marginBottom:8}} placeholder="Brand (optional)" value={form.brand} onChange={e=>setForm({...form,brand:e.target.value})}/>
+          <input className="input" style={{marginBottom:8}} placeholder="Category / shape — e.g. Curve / Arc" value={form.category} onChange={e=>setForm({...form,category:e.target.value})}/>
+          <input className="input" style={{marginBottom:8}} placeholder="Size — e.g. Long Arm, 6&quot;" value={form.size} onChange={e=>setForm({...form,size:e.target.value})}/>
+          <input className="input" style={{marginBottom:8}} placeholder="SKU (optional)" value={form.sku} onChange={e=>setForm({...form,sku:e.target.value})}/>
+          <input className="input" style={{marginBottom:10}} placeholder="Notes (optional)" value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/>
+          <button className="btn active" disabled={saving} onClick={addCustomRuler}>{saving?"Saving…":"Save & add to stash"}</button>
+        </div>
+      )}
       {filtered.map(ruler=>{
         const isOwned=owned[ruler.id];
+        const isCustom=ruler.created_by===userId;
         return(
           <div key={ruler.id} className="card" style={{borderColor:isOwned?"#1A5C1A":undefined}}>
             <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
               <div style={{flex:1}}>
-                <div className="thread-name">{ruler.brand} — {ruler.name}</div>
+                <div className="thread-name">{ruler.brand} — {ruler.name}{isCustom&&<span className="muted" style={{fontSize:11,fontWeight:600,marginLeft:6,padding:"1px 6px",border:"1px solid var(--border-teal)",borderRadius:8}}>MINE</span>}</div>
                 <div className="muted">{ruler.category} · {ruler.size}{ruler.sku?` · ${ruler.sku}`:""}{ruler.msrp_usd?` · $${ruler.msrp_usd}`:""}</div>
                 {ruler.notes&&<p style={{fontSize:12,margin:"4px 0 0",color:"#5C4A1E",lineHeight:1.4}}>{ruler.notes}</p>}
               </div>
-              <button className={`btn ${isOwned?"active":""}`} style={{flexShrink:0}} onClick={()=>toggleRuler(ruler.id)}>{isOwned?"✓ Owned":"+ Add"}</button>
+              <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
+                <button className={`btn ${isOwned?"active":""}`} onClick={()=>toggleRuler(ruler.id)}>{isOwned?"✓ Owned":"+ Add"}</button>
+                {isCustom&&<button className="btn" style={{fontSize:12,color:"#9b1c1c"}} onClick={()=>deleteCustomRuler(ruler.id)}>Delete</button>}
+              </div>
             </div>
           </div>
         );
@@ -2397,6 +2451,24 @@ function ColorWheelTab({ supaAllThreads, supaFabrics=[], userId, supabase, addTo
           <div>
             <label style={{ fontSize: 12, color: "var(--muted)", display: "block", marginBottom: 4 }}>Base Color</label>
             <ColorPicker value={baseHex} onChange={setBaseHex} />
+            <select
+              className="input"
+              value=""
+              onChange={e => {
+                const t = (source === "stash" ? stashThreads : supaAllThreads).find(x => String(x.id) === e.target.value);
+                if (t && t.hex_color) setBaseHex(t.hex_color);
+              }}
+              style={{ marginTop: 8, maxWidth: 320 }}
+            >
+              <option value="">↳ Or start from a thread…</option>
+              {(source === "stash" ? stashThreads : supaAllThreads)
+                .filter(t => t && t.hex_color)
+                .map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.brand} {t.color_code} — {t.color_name}
+                  </option>
+                ))}
+            </select>
           </div>
           <div style={{ flex: 1, minWidth: 140 }}>
             <label style={{ fontSize: 12, color: "var(--muted)", display: "block", marginBottom: 4 }}>Match From</label>
@@ -3346,6 +3418,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
   const [colorFamilyKey, setColorFamilyKey]   = useState("All"); // ALWAYS an English key
   const [cameraImage, setCameraImage]         = useState(null);
   const [cameraSample, setCameraSample]       = useState(null);
+  const [manualHex, setManualHex]             = useState("#2a7f7f");
   const [pendingBarcode, setPendingBarcode]   = useState(null);
   const [showAddThread, setShowAddThread]     = useState(false);
   const [editQuickActions, setEditQuickActions] = useState(false);
@@ -4664,6 +4737,15 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
                   <p className="muted">Take a photo of the thread. Once matched, the barcode is saved for everyone.</p>
                 </div>
               )}
+              <div className="card">
+                <h2>Enter a Color</h2>
+                <div style={{fontSize:12,color:"var(--muted)",marginBottom:8}}>Type a hex code or drag the R/G/B sliders, then match.</div>
+                <ColorPicker value={manualHex} onChange={setManualHex}/>
+                <button className="btn active" style={{marginTop:10,width:"100%"}} onClick={()=>{
+                  const rgb=hexToRgb(manualHex); if(!rgb)return;
+                  setCameraSample({hex:manualHex,r:rgb.r,g:rgb.g,b:rgb.b});
+                }}>🎯 Match this color</button>
+              </div>
               <div className="card">
                 <h2>Camera Color Match</h2>
                 <input className="input" type="file" accept="image/*" capture="environment" onChange={handleCameraImageUpload}/>
