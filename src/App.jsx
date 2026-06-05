@@ -275,16 +275,21 @@ function hexToFamilyKey(hexOrThread){
   const max=Math.max(r,g,b),min=Math.min(r,g,b);
   const l=(max+min)/2;
   const chroma=max-min;
+  // Truly neutral (no perceptible hue) → white/cream or grey/black
   if(chroma<20){
-    if(l>210)return "Whites & Creams";
+    if(l>205)return "Whites & Creams";
     return "Greys & Blacks";
   }
-  if(l>210&&chroma<60)return "Whites & Creams";
   let h;
   if(max===r)      h=((g-b)/chroma+6)%6;
   else if(max===g) h=(b-r)/chroma+2;
   else             h=(r-g)/chroma+4;
   h=h*60;
+  // Only pale + low-chroma WARM tones (ivory, linen, cornsilk) are creams.
+  // Pastels with real hue (pink, mint, baby blue) must fall through to hue.
+  if(l>205&&chroma<46&&h>=28&&h<70)return "Whites & Creams";
+  // A light, soft red reads as pink, not red, and definitely not cream.
+  if((h<16||h>=330)&&l>170)return "Pinks & Magentas";
   if(h<15||h>=345) return "Reds";
   if(h<38)         return "Oranges";
   if(h<65)         return "Yellows & Golds";
