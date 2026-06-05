@@ -495,7 +495,7 @@ function MachineStashSection({ machines, supabase, userId, onRefresh }) {
 // UNIVERSAL STASH
 // ─────────────────────────────────────────────────────────────
 function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, threads,
-  updateSpools, updateInventoryTarget, addManualShoppingItem, removeShoppingItem, settings, userSettings, userPlan }) {
+  updateSpools, updateInventoryTarget, addManualShoppingItem, removeShoppingItem, settings, userSettings, userPlan, onUseInHarmony }) {
   const planBasic   = userPlan === "basic" || userPlan === "premium";
   const planPremium = userPlan === "premium";
   const [activeSection, setActiveSection] = useState("threads");
@@ -746,6 +746,7 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
                           + Shopping List
                         </button>
                       )}
+                      {onUseInHarmony&&<button className="btn" style={{fontSize:11,padding:"4px 10px",marginLeft:isLow?0:"auto"}} onClick={()=>onUseInHarmony(hex)}>🎨 Color Harmony</button>}
                     </div>
                   </div>
                 );
@@ -894,6 +895,7 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
                   </label>
                   <div className="button-row">
                     <button className="btn" onClick={async()=>{ if(supabase){ await supabase.from("user_fabric_inventory").delete().eq("id",item.id); fetchAll(); } }}>Remove</button>
+                    {onUseInHarmony&&<button className="btn" onClick={()=>onUseInHarmony(f.hex_color||"#cccccc")}>🎨 Color Harmony</button>}
                   </div>
                 </div>
               );
@@ -2281,7 +2283,7 @@ function ColorPicker({ value, onChange }) {
   );
 }
 
-function ColorWheelTab({ supaAllThreads, supaFabrics=[], userId, supabase, addToUserInventory, addFabricToInventory, addManualShoppingItem }) {
+function ColorWheelTab({ supaAllThreads, supaFabrics=[], seedHex=null, userId, supabase, addToUserInventory, addFabricToInventory, addManualShoppingItem }) {
   const [stashThreads, setStashThreads] = useState([]);
 
   useEffect(() => {
@@ -2348,6 +2350,13 @@ function ColorWheelTab({ supaAllThreads, supaFabrics=[], userId, supabase, addTo
 
   const [harmony, setHarmony] = useState("complementary");
   const [baseHex, setBaseHex] = useState("#2a7f7f");
+
+  // When a thread/match pushes a color in, adopt it as the base.
+  useEffect(() => {
+    const hx = seedHex && seedHex.hex;
+    if (hx && /^#[0-9a-fA-F]{6}$/.test(hx)) setBaseHex(hx);
+  }, [seedHex]);
+
   const [source, setSource] = useState("all");
   const [matches, setMatches] = useState([]);
 
@@ -3389,6 +3398,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
   const [tab, setTab]                 = useState("home");
   const [showGame, setShowGame]       = useState(false);
   const [subTab, setSubTab]           = useState("thread"); // match sub-tabs
+  const [harmonySeed, setHarmonySeed] = useState(null); // hex pushed to Color Wheel from a thread/match
   const [moreSubTab, setMoreSubTab]   = useState("machines");
   const [threads, setThreads]         = useState(starterThreads);
   const [supaAllThreads, setSupaAllThreads] = useState([]); // unified thread_library — all brands
@@ -4116,6 +4126,12 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
           <div><b>Color family:</b> {hexToFamilyKey(fabric)}</div>
           {fabric.nearest_kona_name&&<div><b>Nearest Kona:</b> {fabric.nearest_kona_name}</div>}
         </div>
+        <button
+          onClick={()=>{ setHarmonySeed({hex,t:Date.now()}); setSubTab("colorwheel"); }}
+          style={{marginTop:8,width:"100%",padding:"8px 12px",borderRadius:"var(--r-sm)",
+            border:"1.5px solid var(--teal)",background:"var(--teal-pale)",color:"var(--teal)",
+            fontWeight:700,fontSize:13,cursor:"pointer"}}
+        >🎨 Use this color in Color Harmony</button>
 
         {/* Cross-ref 1: nearest matching thread */}
         {nearestThread&&(
@@ -4211,6 +4227,12 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
             <div><b>Color family:</b> {hexToFamilyKey(thread)}</div>
           </div>
         )}
+        <button
+          onClick={()=>{ setHarmonySeed({hex,t:Date.now()}); setSubTab("colorwheel"); }}
+          style={{marginTop:8,width:"100%",padding:"8px 12px",borderRadius:"var(--r-sm)",
+            border:"1.5px solid var(--teal)",background:"var(--teal-pale)",color:"var(--teal)",
+            fontWeight:700,fontSize:13,cursor:"pointer"}}
+        >🎨 Use this color in Color Harmony</button>
         {!isAllBrandsRow&&!isSupaThread&&(
           <div className="list-box">
             {settings.showBarcodes&&thread.barcode&&<div><b>Barcode:</b> {thread.barcode}</div>}
@@ -4716,6 +4738,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
             <ColorWheelTab
               supaAllThreads={supaAllThreads}
               supaFabrics={supaFabrics}
+              seedHex={harmonySeed}
               userId={userId}
               supabase={supabase}
               addToUserInventory={addToUserInventory}
@@ -4867,6 +4890,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
             settings={settings}
             userSettings={settings}
             userPlan={userPlan}
+            onUseInHarmony={hex=>{ setHarmonySeed({hex,t:Date.now()}); setSubTab("colorwheel"); setTab("match"); }}
           />
         </>
         )
