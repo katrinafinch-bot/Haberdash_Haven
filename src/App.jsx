@@ -3914,32 +3914,27 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
             return;
           }
         }
-        // Store directly in user_inventory using thread_library_all id
-        // Single thread_library table — thread.id is always the FK
         const{error}=await supabase.from("user_inventory")
           .upsert({user_id:userId,thread_id:thread.id,spool_count:1,inventory_target:settings.defaultInventoryTarget||0},{onConflict:"user_id,thread_id"});
         if(error){
-          console.error("user_inventory upsert error:",error.message);
+          console.error("user_inventory upsert error:",error);
+          setMessage(`⚠ Couldn't save to stash: ${error.message}`);
           saveThreadToLocalStash(thread);
-          setMessage(`${label} saved locally.`);
-          return;
-        }
-        if(error){
-          console.error("user_inventory upsert error:",error.message);
-          // If FK fails (thread_id not in thread_library), save to local stash instead
-          saveThreadToLocalStash(thread);
-          setMessage(`${label} saved to local stash.`);
           return;
         }
         setMessage(`${label} added to your stash!`);
         return;
       }
+      if(supabase&&userId&&!thread.id){
+        setMessage(`⚠ ${label} has no library id — saved locally instead.`);
+      }
     }catch(e){
       console.error("addToUserInventory error:",e);
+      setMessage(`⚠ ${e.message||"Error adding to stash"}`);
     }
-    // Offline / no supabase — save locally
+    // Offline / no supabase / no id — save locally
     saveThreadToLocalStash(thread);
-    setMessage(`${label} saved to local stash.`);
+    if(!(supabase&&userId)) setMessage(`${label} saved to local stash.`);
   };
 
   const saveThreadToLocalStash=thread=>{
