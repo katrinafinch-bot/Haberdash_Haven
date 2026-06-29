@@ -33,6 +33,7 @@ const QUICK_ACTION_CATALOG = [
   {key:"accuquilt",  label:"AccuQuilt",  emoji:"◈",  cls:"amber", dest:{tab:"more",sub:"accuquilt"},  needsAuth:true},
   {key:"feet",       label:"Feet",       emoji:"👟", cls:"ocean", dest:{tab:"more",sub:"feet"},       needsAuth:true},
   {key:"rulers",     label:"Rulers",     emoji:"📐", cls:"green", dest:{tab:"more",sub:"rulers"},     needsAuth:true},
+  {key:"tools",      label:"Tools",      emoji:"🧮", cls:"ocean", dest:{tab:"more",sub:"tools"},      needsAuth:false},
   {key:"projects",   label:"Projects",   emoji:"◉",  cls:"green", dest:{tab:"projects"},              needsAuth:true},
   {key:"forum",      label:"Forum",      emoji:"💬", cls:"navy",  dest:{tab:"more",sub:"forum"},      needsAuth:true},
   {key:"settings",   label:"Settings",   emoji:"⚙",  cls:"navy",  dest:{tab:"more",sub:"settings"},   needsAuth:true},
@@ -1018,6 +1019,34 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
   );
 }
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// ADD-TO-SHOPPING BUTTON — shared by the machine/die/ruler/feet
+// browsers. Inserts a row into the shopping_custom ("Other Items")
+// table so non-thread supplies land in the Stash → Shopping list.
+// ─────────────────────────────────────────────────────────────
+function AddToShoppingButton({ supabase, userId, label, category }) {
+  const [added, setAdded] = useState(false);
+  const [busy, setBusy]   = useState(false);
+  if(!userId||!supabase) return null;
+  async function add(){
+    if(busy||added) return;
+    setBusy(true);
+    const item=String(label||"").trim();
+    if(!item){ setBusy(false); return; }
+    const{error}=await supabase.from("shopping_custom")
+      .insert({user_id:userId,item,qty:null,notes:category||null});
+    setBusy(false);
+    if(error){ alert("Couldn't add to shopping list: "+error.message); return; }
+    setAdded(true);
+  }
+  return(
+    <button className="btn" style={{flexShrink:0,fontSize:11,padding:"6px 12px",whiteSpace:"nowrap"}}
+      disabled={busy||added} onClick={add} title="Add to shopping list">
+      {added?"✓ On list":"🛒 Shopping"}
+    </button>
+  );
+}
+
 function MachinesBrowser({ supabase, userId }) {
   const [machines,setMachines]   = useState([]);
   const [owned,setOwned]         = useState({});
@@ -1285,11 +1314,14 @@ function MachinesBrowser({ supabase, userId }) {
                     </button>
                   </div>
 
+                  <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0,alignItems:"stretch"}}>
                   <button className={`btn ${isOwned?"active":""}`}
                     style={{flexShrink:0,fontSize:11,padding:"6px 12px"}}
                     onClick={()=>toggleMachine(machine.id)}>
                     {isOwned?"✓ Owned":"+ Add"}
                   </button>
+                  <AddToShoppingButton supabase={supabase} userId={userId} label={`${machine.brand} ${machine.model}`} category="Machine"/>
+                  </div>
                 </div>
               </div>
             );
@@ -1514,11 +1546,14 @@ function AccuQuiltBrowser({ supabase, userId }) {
                   </div>
 
                   {/* Add button */}
+                  <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0,alignItems:"stretch"}}>
                   <button className={`btn ${isOwned?"active":""}`}
                     style={{flexShrink:0,fontSize:11,padding:"6px 12px"}}
                     onClick={()=>toggleDie(die.id)}>
                     {isOwned?"✓ Owned":"+ Add"}
                   </button>
+                  <AddToShoppingButton supabase={supabase} userId={userId} label={die.product_name} category={`AccuQuilt${die.product_type?` · ${die.product_type}`:""}`}/>
+                  </div>
                 </div>
               </div>
             );
@@ -1889,6 +1924,7 @@ function RulerBrowser({ supabase, userId }) {
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
                 <button className={`btn ${isOwned?"active":""}`} onClick={()=>toggleRuler(ruler.id)}>{isOwned?"✓ Owned":"+ Add"}</button>
+                <AddToShoppingButton supabase={supabase} userId={userId} label={`${ruler.brand} — ${ruler.name}`} category={`Ruler${ruler.size?` · ${ruler.size}`:""}`}/>
                 {isCustom&&<button className="btn" style={{fontSize:12,color:"#9b1c1c"}} onClick={()=>deleteCustomRuler(ruler.id)}>Delete</button>}
               </div>
             </div>
@@ -2155,11 +2191,14 @@ function FeetBrowser({ supabase, userId }) {
                     )}
                   </div>
 
+                  <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0,alignItems:"stretch"}}>
                   <button className={`btn ${isOwned?"active":""}`}
                     style={{flexShrink:0,fontSize:11,padding:"6px 12px"}}
                     onClick={()=>toggleFoot(foot.id)}>
                     {isOwned?"✓ Owned":"+ Add"}
                   </button>
+                  <AddToShoppingButton supabase={supabase} userId={userId} label={`${foot.brand?foot.brand+" ":""}${foot.foot_name}`} category="Presser foot"/>
+                  </div>
                 </div>
               </div>
             );
