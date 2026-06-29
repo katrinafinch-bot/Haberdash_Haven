@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { t } from "./i18n.js";
 
 /**
  * FieldGuide — full-screen modal for the bilingual
@@ -14,7 +15,39 @@ import React, { useEffect, useState } from "react";
  * The mount is also gated in App.jsx by canAccess("basic"); RLS is the
  * real enforcement, the mount check is UX.
  */
-export default function FieldGuide({ supabase, onClose }) {
+/**
+ * srcDoc anchor fix: inside an `about:srcdoc` iframe, bare `#id` TOC links
+ * resolve against the PARENT app URL and navigate the iframe away instead of
+ * scrolling. We inject a capture-phase click handler that scrolls to the target
+ * element itself, offset by the guide's sticky topbar height. Runs inside the
+ * sandbox (allow-scripts) and covers every language edition automatically.
+ */
+function withAnchorFix(html) {
+  if (typeof html !== "string") return html;
+  const fix = `
+<script>
+(function(){
+  document.addEventListener('click', function(e){
+    var a = e.target && e.target.closest ? e.target.closest('a[href^="#"]') : null;
+    if(!a) return;
+    var href = a.getAttribute('href');
+    if(!href || href === '#') return;
+    var el = document.getElementById(decodeURIComponent(href.slice(1)));
+    if(!el) return;
+    e.preventDefault();
+    var bar = document.querySelector('.topbar');
+    var off = bar ? bar.getBoundingClientRect().height + 8 : 72;
+    var top = el.getBoundingClientRect().top + window.pageYOffset - off;
+    window.scrollTo({ top: top, behavior: 'smooth' });
+  }, true);
+})();
+<\/script>`;
+  return html.indexOf("</body>") !== -1
+    ? html.replace("</body>", fix + "</body>")
+    : html + fix;
+}
+
+export default function FieldGuide({ supabase, onClose, lang="en-US" }) {
   const [html, setHtml]     = useState(null);
   const [status, setStatus] = useState("loading"); // loading | ready | denied | error
 
@@ -30,7 +63,7 @@ export default function FieldGuide({ supabase, onClose }) {
         if (!alive) return;
         if (error) { console.error("Field guide fetch error:", error); setStatus("error"); return; }
         if (!data || !data.html) { setStatus("denied"); return; } // RLS filtered it out
-        setHtml(data.html);
+        setHtml(withAnchorFix(data.html));
         setStatus("ready");
       });
     return () => { alive = false; };
@@ -59,22 +92,22 @@ export default function FieldGuide({ supabase, onClose }) {
             fontFamily: "'Playfair Display', serif", fontWeight: 800, fontSize: 17,
             lineHeight: 1.1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
           }}>
-            Quilter&rsquo;s Field Guide
+            {t("fg_title",lang)}
           </div>
           <div style={{ fontFamily: "'Caveat', cursive", fontSize: 15, opacity: 0.92, lineHeight: 1.1 }}>
-            Know your tools &amp; materials
+            {t("fg_subtitle",lang)}
           </div>
         </div>
         <button
           onClick={onClose}
-          aria-label="Close the field guide"
+          aria-label={t("fg_close",lang)}
           style={{
             flexShrink: 0, background: "rgba(255,255,255,0.16)", color: "#fff",
             border: "1px solid rgba(255,255,255,0.35)", borderRadius: 999,
             padding: "8px 16px", fontWeight: 700, fontSize: 14, cursor: "pointer",
           }}
         >
-          &#10005; Close
+          &#10005; {t("fg_close",lang)}
         </button>
       </div>
 
@@ -96,33 +129,32 @@ export default function FieldGuide({ supabase, onClose }) {
           {status === "loading" && (
             <>
               <div style={{ fontSize: 30 }}>&#128216;</div>
-              <div style={{ fontWeight: 700 }}>Opening your field guide&hellip;</div>
+              <div style={{ fontWeight: 700 }}>{t("fg_loading",lang)}</div>
             </>
           )}
           {status === "denied" && (
             <>
               <div style={{ fontSize: 30 }}>&#128274;</div>
               <div style={{ fontWeight: 800, color: "var(--teal, #0D5252)" }}>
-                The Field Guide is a Basic feature
+                {t("fg_denied_title",lang)}
               </div>
               <div className="muted" style={{ fontSize: 13, maxWidth: 320 }}>
-                Upgrade to Basic to unlock the full bilingual guide to your tools, materials,
-                and selling your quilts.
+                {t("fg_denied_body",lang)}
               </div>
               <button
                 className="btn active"
                 style={{ marginTop: 6 }}
                 onClick={() => { window.location.href = window.location.origin; }}
               >
-                Upgrade to Basic
+                {t("stash_upgrade_basic",lang)}
               </button>
             </>
           )}
           {status === "error" && (
             <>
               <div style={{ fontSize: 30 }}>&#128533;</div>
-              <div style={{ fontWeight: 700 }}>Couldn&rsquo;t load the field guide.</div>
-              <div className="muted" style={{ fontSize: 13 }}>Please close and try again.</div>
+              <div style={{ fontWeight: 700 }}>{t("fg_error_title",lang)}</div>
+              <div className="muted" style={{ fontSize: 13 }}>{t("fg_error_body",lang)}</div>
             </>
           )}
         </div>
