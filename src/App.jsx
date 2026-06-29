@@ -5,6 +5,8 @@ import { ProjectsTab } from "./ProjectsTab.jsx";
 import InsuranceReportBuilder from "./InsuranceReportBuilder.jsx";
 import PhotoUploader from "./PhotoUploader.jsx";
 import SpoolQuest from "./SpoolQuest.jsx";
+import FieldGuide from "./FieldGuide.jsx";
+import ToolsTab from "./ToolsTab.jsx";
 
 // ─────────────────────────────────────────────────────────────
 // CONSTANTS
@@ -3059,6 +3061,25 @@ function AuthScreen({ supabase, onGuest, onSignIn }) {
         </div>
       </div>
 
+      {/* Intro — what Haberdash Haven is */}
+      <div style={{maxWidth:400, width:"100%", textAlign:"center", marginBottom:22}}>
+        <p style={{fontFamily:"Nunito, sans-serif", fontSize:14.5, lineHeight:1.6, color:"#2A3D3D", margin:"0 0 14px"}}>
+          Your sewing room, in your pocket — the app that knows your supplies.{" "}
+          <strong style={{color:"#0D5252"}}>Match thread &amp; fabric colors</strong> in seconds, keep
+          your whole stash — threads, fabrics, machines, rulers, dies &amp; presser feet — at your
+          fingertips, plan projects, and build smart shopping lists so you never buy a duplicate spool again.
+        </p>
+        <div style={{display:"flex", flexWrap:"wrap", gap:8, justifyContent:"center"}}>
+          {["🎨 Color match","🧵 Stash tracking","📋 Projects","🛒 Shopping lists"].map(t=>(
+            <span key={t} style={{
+              fontSize:12, fontWeight:700, color:"#0D5252",
+              background:"rgba(255,255,255,0.72)", border:"1px solid #B8D8D8",
+              borderRadius:999, padding:"5px 12px"
+            }}>{t}</span>
+          ))}
+        </div>
+      </div>
+
       {/* Auth card */}
       <div style={{
         background:"white", borderRadius:20, padding:"28px 28px",
@@ -3402,6 +3423,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
   // ── State ─────────────────────────────────────────────────
   const [tab, setTab]                 = useState("home");
   const [showGame, setShowGame]       = useState(false);
+  const [showFieldGuide, setShowFieldGuide] = useState(false); // Quilter's Field Guide modal (Basic feature)
   const [subTab, setSubTab]           = useState("thread"); // match sub-tabs
   const [harmonySeed, setHarmonySeed] = useState(null); // hex pushed to Color Wheel from a thread/match
   const [moreSubTab, setMoreSubTab]   = useState("machines");
@@ -3590,6 +3612,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
   const [rawNotifs, setRawNotifs] = useState([]); // rows from `notifications`
   const [dismissedIds, setDismissedIds] = useState([]); // session-only local hide
   const [showNotifs, setShowNotifs] = useState(false);
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
 
   const loadNotifications = useCallback(async()=>{
     if(!supabase||!userId||isGuest){ setRawNotifs([]); return; }
@@ -4379,7 +4402,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
         {user && !isGuest && (
           <div style={{position:"absolute",top:12,right:12,zIndex:20}}>
             <button
-              onClick={()=>{ setShowNotifs(v=>!v); if(!showNotifs) markAllRead(); }}
+              onClick={()=>{ setShowNotifs(v=>!v); if(!showNotifs) markAllRead(); setShowAccountMenu(false); }}
               aria-label="Notifications"
               style={{
                 position:"relative",background:"rgba(255,255,255,0.12)",border:"none",
@@ -4395,6 +4418,24 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
                   border:"2px solid var(--teal)"
                 }}>{unreadCount>9?"9+":unreadCount}</span>
               )}
+            </button>
+          </div>
+        )}
+
+        {/* Account gear — signed-in users only. Holds Profile / Settings / Help.
+            Dropdown is rendered OUTSIDE the header (below) for the same
+            transform-anchoring reason as the notification panel. */}
+        {user && !isGuest && (
+          <div style={{position:"absolute",top:12,right:58,zIndex:20}}>
+            <button
+              onClick={()=>{ setShowAccountMenu(v=>!v); setShowNotifs(false); }}
+              aria-label="Account menu"
+              style={{
+                background:"rgba(255,255,255,0.12)",border:"none",
+                borderRadius:"50%",width:38,height:38,cursor:"pointer",fontSize:18,
+                display:"flex",alignItems:"center",justifyContent:"center",color:"#fff"
+              }}>
+              ⚙
             </button>
           </div>
         )}
@@ -4450,11 +4491,38 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
         </>
       )}
 
+      {/* ── Account menu dropdown — rendered at app-shell level, outside the
+          transformed header (same reason as the notification panel). ── */}
+      {user && !isGuest && showAccountMenu && (
+        <>
+          <div
+            onClick={()=>setShowAccountMenu(false)}
+            style={{position:"fixed",inset:0,zIndex:999,background:"rgba(0,0,0,0.15)"}}
+          />
+          <div style={{
+            position:"fixed",top:64,right:12,width:210,maxWidth:"86vw",zIndex:1000,
+            background:"var(--warm-white)",border:"1.5px solid var(--border-teal)",
+            borderRadius:"var(--r-md)",boxShadow:"0 8px 28px rgba(0,0,0,0.22)",
+            overflow:"hidden",textAlign:"left"
+          }}
+            onClick={e=>e.stopPropagation()}>
+            {[["profile","👤 Profile"],["settings","⚙ Settings"],["help","❓ Help"]].map(([key,label])=>(
+              <div key={key}
+                onClick={()=>{ setTab("more"); setMoreSubTab(key); setShowAccountMenu(false); }}
+                style={{padding:"12px 16px",cursor:"pointer",fontWeight:700,fontSize:14,
+                  color:"var(--teal)",borderBottom:"1px solid var(--teal-pale)"}}>
+                {label}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
       {/* ── 4-tab main nav ── */}
       <nav className="nav-row main-nav" style={{position:"relative",zIndex:1}}>
         {mainTabs.map(([key,label])=>(
           <button key={key} className={`btn ${tab===key?"active":""}`}
-            onClick={()=>setTab(key)}
+            onClick={()=>{ setTab(key); if(key==="more"&&["profile","settings","help"].includes(moreSubTab)) setMoreSubTab("machines"); }}
             style={{flex:1,textAlign:"center"}}>
             {label}
           </button>
@@ -4491,6 +4559,25 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
               <div style={{fontSize:12,color:"var(--muted)"}}>Rescue your quilt before the Bee deadline. A quick coffee-break game.</div>
             </div>
             <button className="btn active" style={{flexShrink:0,fontWeight:700}} onClick={()=>setShowGame(true)}>Play</button>
+          </div>
+
+          {/* Quilter's Field Guide — bilingual reference, Basic feature */}
+          <div className="card" style={{background:"linear-gradient(135deg,var(--teal-pale),var(--linen))",border:"1.5px solid var(--border-teal)",display:"flex",alignItems:"center",gap:14}}>
+            <div style={{fontSize:34,flexShrink:0}}>📘</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:800,color:"var(--teal)"}}>Quilter&rsquo;s Field Guide</div>
+              <div style={{fontSize:12,color:"var(--muted)"}}>
+                {canAccess("basic")
+                  ? "Know your needles, threads, fabrics, batting & tools — plus how to price and sell your quilts. English & Español."
+                  : "A bilingual guide to your tools, materials, and selling your quilts."}
+              </div>
+            </div>
+            {canAccess("basic") ? (
+              <button className="btn active" style={{flexShrink:0,fontWeight:700}} onClick={()=>setShowFieldGuide(true)}>Open</button>
+            ) : (
+              <button className="btn" style={{flexShrink:0,fontWeight:700}} title="Basic feature"
+                onClick={()=>window.location.href=window.location.origin}>🔒 Basic</button>
+            )}
           </div>
 
           <div className="card">
@@ -4921,12 +5008,14 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
           ══════════════════════════════════════════════════════ */}
       {tab==="more"&&(
         <>
-          {/* More sub-nav */}
-          <div className="sub-tab-row">
-            {[["machines","⚙️ Machines"],["accuquilt","◈ AccuQuilt"],["feet","👟 Feet"],["rulers","📐 Rulers"],["forum","💬 Forum"],["help","? Help"],["profile","👤 Profile"],["settings","⚙ Settings"]].map(([key,label])=>(
-              <button key={key} className={`sub-tab ${moreSubTab===key?"active":""}`} onClick={()=>setMoreSubTab(key)}>{label}</button>
-            ))}
-          </div>
+          {/* More sub-nav — browse items only. Profile/Settings/Help moved to the header gear menu. */}
+          {!["profile","settings","help"].includes(moreSubTab) && (
+            <div className="sub-tab-row">
+              {[["machines","⚙️ Machines"],["accuquilt","◈ AccuQuilt"],["feet","👟 Feet"],["rulers","📐 Rulers"],["tools","🧮 Tools"],["forum","💬 Forum"]].map(([key,label])=>(
+                <button key={key} className={`sub-tab ${moreSubTab===key?"active":""}`} onClick={()=>setMoreSubTab(key)}>{label}</button>
+              ))}
+            </div>
+          )}
 
           {moreSubTab==="machines"&&(
             (!user||isGuest||!canAccess("basic"))
@@ -4936,6 +5025,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
           {moreSubTab==="accuquilt"&&(supabase?<AccuQuiltBrowser supabase={supabase} userId={userId}/>:<div className="card"><p className="muted">Connect to Supabase to browse AccuQuilt.</p></div>)}
           {moreSubTab==="feet"&&(supabase?<FeetBrowser supabase={supabase} userId={userId}/>:<div className="card"><p className="muted">Connect to Supabase to browse presser feet.</p></div>)}
           {moreSubTab==="rulers"&&(supabase?<RulerBrowser supabase={supabase} userId={userId}/>:<div className="card"><p className="muted">Connect to Supabase to browse rulers.</p></div>)}
+          {moreSubTab==="tools"&&<ToolsTab/>}
           {moreSubTab==="forum"&&(
             !supabase
               ?<div className="card"><p className="muted">Connect to Supabase to access the forum.</p></div>
@@ -5201,6 +5291,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
       )}
 
       {showGame && <SpoolQuest onClose={()=>setShowGame(false)} />}
+      {showFieldGuide && canAccess("basic") && <FieldGuide supabase={supabase} onClose={()=>setShowFieldGuide(false)} />}
     </div>
   );
 }
