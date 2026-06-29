@@ -5,11 +5,14 @@ import { ProjectsTab } from "./ProjectsTab.jsx";
 import InsuranceReportBuilder from "./InsuranceReportBuilder.jsx";
 import PhotoUploader from "./PhotoUploader.jsx";
 import SpoolQuest from "./SpoolQuest.jsx";
+import FieldGuide from "./FieldGuide.jsx";
+import ToolsTab from "./ToolsTab.jsx";
 
 // ─────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────
 const APP_VERSION = "3.0.0";
+const FREE_THREAD_LIMIT = 25; // free-plan owned-thread cap — single source of truth
 const LOCAL_LIBRARY_KEY = "haberdash_haven_thread_library";
 const LOCAL_SYNC_META   = "haberdash_haven_sync_meta";
 
@@ -274,16 +277,21 @@ function hexToFamilyKey(hexOrThread){
   const max=Math.max(r,g,b),min=Math.min(r,g,b);
   const l=(max+min)/2;
   const chroma=max-min;
+  // Truly neutral (no perceptible hue) → white/cream or grey/black
   if(chroma<20){
-    if(l>210)return "Whites & Creams";
+    if(l>205)return "Whites & Creams";
     return "Greys & Blacks";
   }
-  if(l>210&&chroma<60)return "Whites & Creams";
   let h;
   if(max===r)      h=((g-b)/chroma+6)%6;
   else if(max===g) h=(b-r)/chroma+2;
   else             h=(r-g)/chroma+4;
   h=h*60;
+  // Only pale + low-chroma WARM tones (ivory, linen, cornsilk) are creams.
+  // Pastels with real hue (pink, mint, baby blue) must fall through to hue.
+  if(l>205&&chroma<46&&h>=28&&h<70)return "Whites & Creams";
+  // A light, soft red reads as pink, not red, and definitely not cream.
+  if((h<16||h>=330)&&l>170)return "Pinks & Magentas";
   if(h<15||h>=345) return "Reds";
   if(h<38)         return "Oranges";
   if(h<65)         return "Yellows & Golds";
@@ -494,7 +502,7 @@ function MachineStashSection({ machines, supabase, userId, onRefresh }) {
 // UNIVERSAL STASH
 // ─────────────────────────────────────────────────────────────
 function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, threads,
-  updateSpools, updateInventoryTarget, addManualShoppingItem, removeShoppingItem, settings, userSettings, userPlan }) {
+  updateSpools, updateInventoryTarget, addManualShoppingItem, removeShoppingItem, settings, userSettings, userPlan, onUseInHarmony, lang="en-US" }) {
   const planBasic   = userPlan === "basic" || userPlan === "premium";
   const planPremium = userPlan === "premium";
   const [activeSection, setActiveSection] = useState("threads");
@@ -625,6 +633,7 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
     Specialty:{bg:"#FDECEA",text:"#C0392B"},General:{bg:"#F5F5F5",text:"#888"},
   };
 
+  const SECTION_I18N={threads:"stash_threads",fabrics:"stash_fabrics",machines:"stash_machines",rulers:"stash_rulers",dies:"stash_accuquilt",feet:"stash_feet",accessories:"stash_accessories",shopping:"stash_shopping"};
   const allSections=[
     {key:"threads",label:"Threads",emoji:"🧵",minPlan:"free"},
     {key:"fabrics",label:"Fabrics",emoji:"◧",minPlan:"premium"},
@@ -647,14 +656,14 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
   // Use Supabase stash threads if signed in, else local threads
   const useSupaStash = supabase&&userId;
 
-  if(loading)return<div className="card"><p className="muted">Loading your stash…</p></div>;
+  if(loading)return<div className="card"><p className="muted">{t("stash_loading",lang)}</p></div>;
 
   return(
     <div>
       <div className="stash-banner">
-        <h2>Your Stash</h2>
+        <h2>{t("stash_title",lang)}</h2>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <span className="count-chip">{totalItems} items</span>
+          <span className="count-chip">{totalItems} {t("stash_items",lang)}</span>
           {planPremium ? (
             <button
               onClick={()=>setShowReport(true)}
@@ -665,7 +674,7 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
                 fontSize:11,fontWeight:800,cursor:"pointer",
                 fontFamily:"Nunito, sans-serif"
               }}>
-              📋 Insurance Report
+              📋 {t("stash_insurance",lang)}
             </button>
           ) : (
             <button
@@ -678,7 +687,7 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
                 fontSize:11,fontWeight:800,cursor:"not-allowed",opacity:0.6,
                 fontFamily:"Nunito, sans-serif"
               }}>
-              📋 Insurance Report 🔒
+              📋 {t("stash_insurance",lang)} 🔒
             </button>
           )}
         </div>
@@ -689,7 +698,7 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
         {sections.map(s=>(
           <button key={s.key} className={`section-pill ${activeSection===s.key?"active":""}`}
             onClick={()=>setActiveSection(s.key)}>
-            {s.emoji} {s.label} ({counts[s.key]})
+            {s.emoji} {t(SECTION_I18N[s.key],lang)} ({counts[s.key]})
           </button>
         ))}
       </div>
@@ -698,17 +707,17 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
       {activeSection==="threads"&&(
         useSupaStash?(
           <div className="card">
-            <h2>Threads ({counts.threads})</h2>
-            {!planBasic && counts.threads >= 25 && (
+            <h2>{t("stash_threads",lang)} ({counts.threads})</h2>
+            {!planBasic && counts.threads >= FREE_THREAD_LIMIT && (
               <div style={{background:"#FFF3CD",border:"1px solid #FBBF24",borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:13,color:"#92400E"}}>
-                <strong>Stash limit reached.</strong> Free accounts can store up to 25 threads. <span style={{color:"var(--teal)",cursor:"pointer",textDecoration:"underline"}} onClick={()=>window.location.href=window.location.origin}>Upgrade to Basic</span> for unlimited.
+                <strong>{t("stash_limit_reached",lang)}</strong> {t("stash_limit_detail",lang).replace("{n}",FREE_THREAD_LIMIT)} <span style={{color:"var(--teal)",cursor:"pointer",textDecoration:"underline"}} onClick={()=>window.location.href=window.location.origin}>{t("stash_upgrade_basic",lang)}</span> {t("stash_upgrade_unlim",lang)}
               </div>
             )}
-            {!planBasic && counts.threads > 0 && counts.threads < 25 && (
-              <div style={{fontSize:12,color:"var(--muted)",marginBottom:8}}>{counts.threads}/25 threads · <span style={{color:"var(--teal)",cursor:"pointer",textDecoration:"underline"}} onClick={()=>window.location.href=window.location.origin}>Upgrade for unlimited</span></div>
+            {!planBasic && counts.threads > 0 && counts.threads < FREE_THREAD_LIMIT && (
+              <div style={{fontSize:12,color:"var(--muted)",marginBottom:8}}>{counts.threads}/{FREE_THREAD_LIMIT} {t("stash_threads",lang)} · <span style={{color:"var(--teal)",cursor:"pointer",textDecoration:"underline"}} onClick={()=>window.location.href=window.location.origin}>{t("stash_upgrade_basic",lang)}</span></div>
             )}
             {stash.threads.length===0
-              ?<p className="muted">No threads yet — use the Match tab to find and add threads.</p>
+              ?<p className="muted">{t("stash_threads_empty",lang)}</p>
               :stash.threads.map((item,i)=>{
                 // Support both thread_library (Isacord) and thread_library_all (all brands)
                 const th = item.thread_library;
@@ -724,9 +733,9 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
                       <div style={{flex:1,minWidth:0}}>
                         <div className="thread-name" style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
                           {th.brand} {th.color_code} — {th.color_name}
-                          {isLow && <span style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".5px",color:"#fff",background:"#C0392B",padding:"2px 7px",borderRadius:10}}>Low</span>}
+                          {isLow && <span style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".5px",color:"#fff",background:"#C0392B",padding:"2px 7px",borderRadius:10}}>{t("stash_low",lang)}</span>}
                         </div>
-                        <div className="muted">{th.fiber_type||""} · {spools} {spools===1?"spool":"spools"}{target>0?` · target ${target}`:""}</div>
+                        <div className="muted">{th.fiber_type||""} · {spools} {spools===1?t("stash_spool",lang):t("stash_spools",lang)}{target>0?` · ${t("stash_target_short",lang)} ${target}`:""}</div>
                       </div>
                     </div>
                     <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8,flexWrap:"wrap"}}>
@@ -736,15 +745,16 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
                         <button className="btn" style={{padding:"2px 10px",fontSize:16,lineHeight:1}} onClick={()=>updateStashSpools(item.id,1)}>+</button>
                       </div>
                       <label style={{display:"flex",alignItems:"center",gap:4,fontSize:12,color:"var(--muted)",margin:0}}>
-                        Target
+                        {t("stash_target_short",lang)}
                         <input type="number" min="0" className="input" style={{width:64,padding:"4px 6px"}} value={target} onChange={e=>updateStashTarget(item.id,e.target.value)}/>
                       </label>
                       {isLow && (
                         <button className="btn" style={{fontSize:11,padding:"4px 10px",marginLeft:"auto"}}
                           onClick={()=>addManualShoppingItem({brand:th.brand,color_code:th.color_code,color_name:th.color_name,hex_color:th.hex_color,fiber_type:th.fiber_type,weight:th.weight})}>
-                          + Shopping List
+                          {t("stash_add_shopping",lang)}
                         </button>
                       )}
+                      {onUseInHarmony&&<button className="btn" style={{fontSize:11,padding:"4px 10px",marginLeft:isLow?0:"auto"}} onClick={()=>onUseInHarmony(hex)}>🎨 {t("stash_harmony",lang)}</button>}
                     </div>
                   </div>
                 );
@@ -893,6 +903,7 @@ function UniversalStash({ supabase, userId, shoppingList, mergedShoppingList, th
                   </label>
                   <div className="button-row">
                     <button className="btn" onClick={async()=>{ if(supabase){ await supabase.from("user_fabric_inventory").delete().eq("id",item.id); fetchAll(); } }}>Remove</button>
+                    {onUseInHarmony&&<button className="btn" onClick={()=>onUseInHarmony(f.hex_color||"#cccccc")}>🎨 Color Harmony</button>}
                   </div>
                 </div>
               );
@@ -1798,6 +1809,10 @@ function RulerBrowser({ supabase, userId }) {
   const [owned,setOwned]=useState({});
   const [loading,setLoading]=useState(true);
   const [search,setSearch]=useState("");
+  const [showForm,setShowForm]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const blankForm={brand:"",name:"",category:"",size:"",sku:"",notes:""};
+  const [form,setForm]=useState(blankForm);
   useEffect(()=>{ if(!supabase)return; fetchRulers(); if(userId)fetchOwned(); },[supabase,userId]);
   async function fetchRulers(){ setLoading(true); const{data}=await supabase.from("ruler_library").select("*").order("brand").order("name"); setRulers(data||[]); setLoading(false); }
   async function fetchOwned(){ const{data}=await supabase.from("user_rulers").select("ruler_id").eq("user_id",userId); if(data){const m={};data.forEach(r=>{m[r.ruler_id]=true;});setOwned(m);} }
@@ -1805,6 +1820,37 @@ function RulerBrowser({ supabase, userId }) {
     if(!userId||!supabase)return;
     if(owned[rulerId]){ await supabase.from("user_rulers").delete().eq("user_id",userId).eq("ruler_id",rulerId); setOwned(prev=>{const n={...prev};delete n[rulerId];return n;}); }
     else{ await supabase.from("user_rulers").upsert({user_id:userId,ruler_id:rulerId,quantity:1},{onConflict:"user_id,ruler_id"}); setOwned(prev=>({...prev,[rulerId]:true})); }
+  }
+  async function addCustomRuler(){
+    if(!userId||!supabase)return;
+    if(!form.name.trim()){ alert("Give your ruler a name."); return; }
+    setSaving(true);
+    const row={
+      brand:form.brand.trim()||"Custom",
+      name:form.name.trim(),
+      category:form.category.trim()||null,
+      size:form.size.trim()||null,
+      sku:form.sku.trim()||null,
+      notes:form.notes.trim()||null,
+      created_by:userId,
+    };
+    const{data,error}=await supabase.from("ruler_library").insert(row).select().single();
+    setSaving(false);
+    if(error){ alert("Couldn't save: "+error.message); return; }
+    setRulers(prev=>[...prev,data]);
+    // auto-add the new custom ruler to the user's stash
+    await supabase.from("user_rulers").upsert({user_id:userId,ruler_id:data.id,quantity:1},{onConflict:"user_id,ruler_id"});
+    setOwned(prev=>({...prev,[data.id]:true}));
+    setForm(blankForm); setShowForm(false);
+  }
+  async function deleteCustomRuler(rulerId){
+    if(!userId||!supabase)return;
+    if(!confirm("Delete this custom ruler? It'll be removed from your stash too.")) return;
+    await supabase.from("user_rulers").delete().eq("user_id",userId).eq("ruler_id",rulerId);
+    const{error}=await supabase.from("ruler_library").delete().eq("id",rulerId).eq("created_by",userId);
+    if(error){ alert("Couldn't delete: "+error.message); return; }
+    setRulers(prev=>prev.filter(r=>r.id!==rulerId));
+    setOwned(prev=>{const n={...prev};delete n[rulerId];return n;});
   }
   const filtered=rulers.filter(r=>!search||normalized(r.brand).includes(normalized(search))||normalized(r.name).includes(normalized(search))||normalized(r.category).includes(normalized(search)));
   if(loading)return<div className="card"><p className="muted">Loading ruler library…</p></div>;
@@ -1814,18 +1860,37 @@ function RulerBrowser({ supabase, userId }) {
         <h2 style={{marginBottom:10}}>Ruler Library ({rulers.length})</h2>
         <input className="input" placeholder="Search brand, shape…" value={search} onChange={e=>setSearch(e.target.value)}/>
       </div>
-      <div className="card" style={{padding:"8px 12px"}}><p className="muted">{filtered.length} rulers — tap to add to your stash</p></div>
+      <div className="card" style={{padding:"8px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+        <p className="muted" style={{margin:0}}>{filtered.length} rulers — tap to add to your stash</p>
+        {userId&&<button className="btn" style={{flexShrink:0}} onClick={()=>setShowForm(s=>!s)}>{showForm?"Cancel":"+ Add my own"}</button>}
+      </div>
+      {showForm&&userId&&(
+        <div className="card" style={{padding:"12px 16px"}}>
+          <div className="thread-name" style={{marginBottom:8}}>Add a custom ruler</div>
+          <input className="input" style={{marginBottom:8}} placeholder="Name (required) — e.g. 8&quot; Arc" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/>
+          <input className="input" style={{marginBottom:8}} placeholder="Brand (optional)" value={form.brand} onChange={e=>setForm({...form,brand:e.target.value})}/>
+          <input className="input" style={{marginBottom:8}} placeholder="Category / shape — e.g. Curve / Arc" value={form.category} onChange={e=>setForm({...form,category:e.target.value})}/>
+          <input className="input" style={{marginBottom:8}} placeholder="Size — e.g. Long Arm, 6&quot;" value={form.size} onChange={e=>setForm({...form,size:e.target.value})}/>
+          <input className="input" style={{marginBottom:8}} placeholder="SKU (optional)" value={form.sku} onChange={e=>setForm({...form,sku:e.target.value})}/>
+          <input className="input" style={{marginBottom:10}} placeholder="Notes (optional)" value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/>
+          <button className="btn active" disabled={saving} onClick={addCustomRuler}>{saving?"Saving…":"Save & add to stash"}</button>
+        </div>
+      )}
       {filtered.map(ruler=>{
         const isOwned=owned[ruler.id];
+        const isCustom=ruler.created_by===userId;
         return(
           <div key={ruler.id} className="card" style={{borderColor:isOwned?"#1A5C1A":undefined}}>
             <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
               <div style={{flex:1}}>
-                <div className="thread-name">{ruler.brand} — {ruler.name}</div>
+                <div className="thread-name">{ruler.brand} — {ruler.name}{isCustom&&<span className="muted" style={{fontSize:11,fontWeight:600,marginLeft:6,padding:"1px 6px",border:"1px solid var(--border-teal)",borderRadius:8}}>MINE</span>}</div>
                 <div className="muted">{ruler.category} · {ruler.size}{ruler.sku?` · ${ruler.sku}`:""}{ruler.msrp_usd?` · $${ruler.msrp_usd}`:""}</div>
                 {ruler.notes&&<p style={{fontSize:12,margin:"4px 0 0",color:"#5C4A1E",lineHeight:1.4}}>{ruler.notes}</p>}
               </div>
-              <button className={`btn ${isOwned?"active":""}`} style={{flexShrink:0}} onClick={()=>toggleRuler(ruler.id)}>{isOwned?"✓ Owned":"+ Add"}</button>
+              <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
+                <button className={`btn ${isOwned?"active":""}`} onClick={()=>toggleRuler(ruler.id)}>{isOwned?"✓ Owned":"+ Add"}</button>
+                {isCustom&&<button className="btn" style={{fontSize:12,color:"#9b1c1c"}} onClick={()=>deleteCustomRuler(ruler.id)}>Delete</button>}
+              </div>
             </div>
           </div>
         );
@@ -2115,10 +2180,6 @@ function FeetBrowser({ supabase, userId }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// CROSS-REFERENCE TAB
-
-
-// ─────────────────────────────────────────────────────────────
 // UpgradePrompt — shown when a feature requires a higher plan
 // ─────────────────────────────────────────────────────────────
 function UpgradePrompt({ requiredPlan, feature, currentPlan, isGuest }) {
@@ -2230,7 +2291,7 @@ function ColorPicker({ value, onChange }) {
   );
 }
 
-function ColorWheelTab({ supaAllThreads, supaFabrics=[], userId, supabase, addToUserInventory, addFabricToInventory, addManualShoppingItem }) {
+function ColorWheelTab({ supaAllThreads, supaFabrics=[], seedHex=null, userId, supabase, addToUserInventory, addFabricToInventory, addManualShoppingItem }) {
   const [stashThreads, setStashThreads] = useState([]);
 
   useEffect(() => {
@@ -2297,6 +2358,13 @@ function ColorWheelTab({ supaAllThreads, supaFabrics=[], userId, supabase, addTo
 
   const [harmony, setHarmony] = useState("complementary");
   const [baseHex, setBaseHex] = useState("#2a7f7f");
+
+  // When a thread/match pushes a color in, adopt it as the base.
+  useEffect(() => {
+    const hx = seedHex && seedHex.hex;
+    if (hx && /^#[0-9a-fA-F]{6}$/.test(hx)) setBaseHex(hx);
+  }, [seedHex]);
+
   const [source, setSource] = useState("all");
   const [matches, setMatches] = useState([]);
 
@@ -2400,6 +2468,24 @@ function ColorWheelTab({ supaAllThreads, supaFabrics=[], userId, supabase, addTo
           <div>
             <label style={{ fontSize: 12, color: "var(--muted)", display: "block", marginBottom: 4 }}>Base Color</label>
             <ColorPicker value={baseHex} onChange={setBaseHex} />
+            <select
+              className="input"
+              value=""
+              onChange={e => {
+                const t = (source === "stash" ? stashThreads : supaAllThreads).find(x => String(x.id) === e.target.value);
+                if (t && t.hex_color) setBaseHex(t.hex_color);
+              }}
+              style={{ marginTop: 8, maxWidth: 320 }}
+            >
+              <option value="">↳ Or start from a thread…</option>
+              {(source === "stash" ? stashThreads : supaAllThreads)
+                .filter(t => t && t.hex_color)
+                .map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.brand} {t.color_code} — {t.color_name}
+                  </option>
+                ))}
+            </select>
           </div>
           <div style={{ flex: 1, minWidth: 140 }}>
             <label style={{ fontSize: 12, color: "var(--muted)", display: "block", marginBottom: 4 }}>Match From</label>
@@ -2571,323 +2657,6 @@ function ColorWheelTab({ supaAllThreads, supaFabrics=[], userId, supabase, addTo
     </div>
   );
 }
-
-// User picks two brands. Pick or search a thread from Brand A.
-// App finds the nearest match in Brand B instantly.
-// ─────────────────────────────────────────────────────────────
-function CrossRefTab({ supaAllThreads, threadBrands, brandKeyMap, addToUserInventory,
-                       addProjectRequiredThread, addManualShoppingItem, hexToFamilyKey, settings }) {
-
-  const [brandA, setBrandA]           = useState(threadBrands[0][0]);
-  const [brandB, setBrandB]           = useState(threadBrands[1][0]);
-  const [searchA, setSearchA]         = useState("");
-  const [selectedThread, setSelectedThread] = useState(null);
-  const [results, setResults]         = useState([]); // top 5 matches in brand B
-
-  // Threads for brand A dropdown
-  const brandAKey = brandKeyMap[brandA] || normalized(brandA).replace(/[^a-z0-9]/g,"_");
-  const brandBKey = brandKeyMap[brandB] || normalized(brandB).replace(/[^a-z0-9]/g,"_");
-
-  const brandAThreads = useMemo(()=>{
-    if(!searchA.trim()) return [];
-    const q = normalized(searchA);
-    return supaAllThreads
-      .filter(t => t.brand_key === brandAKey &&
-        (normalized(t.color_name).includes(q) || normalized(t.color_code).includes(q)))
-      .slice(0, 30);
-  }, [supaAllThreads, brandAKey, searchA]);
-
-  // When a thread is selected, find top 5 nearest in brand B
-  // Tries precomputed thread_crossref table first; falls back to live computation
-  useEffect(()=>{
-    if(!selectedThread){ setResults([]); return; }
-
-    async function findMatches(){
-      // ── Try precomputed crossref table ──
-      if(window._supabaseClient){
-        try{
-          const supaClient = window._supabaseClient;
-          const{data,error} = await supaClient
-            .from("thread_crossref")
-            .select("ref_thread_id,distance,distance_pct,thread_library!ref_thread_id(id,brand,brand_key,color_code,color_name,hex_color,fiber_type,weight)")
-            .eq("thread_id", selectedThread.id)
-            .order("distance", {ascending:true})
-            .limit(20); // fetch 20, then filter to target brand top 5
-
-          if(!error && data && data.length > 0){
-            const brandMatches = data
-              .filter(r => r.thread_library?.brand_key === brandBKey && r.distance <= 20)
-              .slice(0,5)
-              .map(r => ({...r.thread_library, _distance: r.distance, _distance_pct: r.distance_pct}));
-
-            if(brandMatches.length > 0){
-              setResults(brandMatches);
-              return;
-            }
-            setResults([{_noEquivalent: true}]);
-            return;
-          }
-        }catch(e){
-          // Crossref table not available yet — fall through to live computation
-        }
-      }
-
-      // ── Live computation fallback ──
-      const rgb = hexToRgb(selectedThread.hex_color);
-      if(!rgb){ setResults([]); return; }
-      const matches = supaAllThreads
-        .filter(t => t.brand_key === brandBKey && t.hex_color)
-        .map(t => ({ thread:t, dist:colorDistance(rgb, hexToRgb(t.hex_color)) }))
-        .filter(m => m.dist <= 20)
-        .sort((a,b) => a.dist - b.dist)
-        .slice(0,5)
-        .map(m => m.thread);
-      if(matches.length === 0){ setResults([{_noEquivalent: true}]); return; }
-      setResults(matches);
-    }
-
-    findMatches();
-  }, [selectedThread, brandBKey, supaAllThreads]);
-
-  // Swap brands
-  function swapBrands() {
-    const tmp = brandA;
-    setBrandA(brandB);
-    setBrandB(tmp);
-    setSelectedThread(null);
-    setSearchA("");
-    setResults([]);
-  }
-
-  return (
-    <div>
-      {/* Brand selectors */}
-      <div className="card">
-        <h2>Thread Cross-Reference</h2>
-        <p className="muted" style={{fontSize:13,marginBottom:14}}>
-          Pick two brands. Search for a color in the first brand — we'll find the closest matches in the second.
-        </p>
-
-        <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gap:10,alignItems:"end",marginBottom:4}}>
-          <label>From Brand
-            <select className="input" style={{marginBottom:0}} value={brandA}
-              onChange={e=>{setBrandA(e.target.value);setSelectedThread(null);setSearchA("");setResults([]);}}>
-              {threadBrands.filter(([l])=>l!==brandB).map(([label])=>
-                <option key={label}>{label}</option>
-              )}
-            </select>
-          </label>
-
-          <button onClick={swapBrands} className="btn"
-            style={{padding:"9px 12px",fontSize:16,marginBottom:0,alignSelf:"end"}}>
-            ⇄
-          </button>
-
-          <label>To Brand
-            <select className="input" style={{marginBottom:0}} value={brandB}
-              onChange={e=>{setBrandB(e.target.value);setSelectedThread(null);setResults([]);}}>
-              {threadBrands.filter(([l])=>l!==brandA).map(([label])=>
-                <option key={label}>{label}</option>
-              )}
-            </select>
-          </label>
-        </div>
-
-        {supaAllThreads.filter(t=>t.brand_key===brandAKey).length===0 && (
-          <p style={{fontSize:12,color:"var(--sun-amber)",marginTop:8}}>
-            ⚠ No {brandA} colors loaded yet.
-          </p>
-        )}
-        {supaAllThreads.filter(t=>t.brand_key===brandBKey).length===0 && (
-          <p style={{fontSize:12,color:"var(--sun-amber)",marginTop:4}}>
-            ⚠ No {brandB} colors loaded yet.
-          </p>
-        )}
-      </div>
-
-      {/* Search brand A */}
-      <div className="card">
-        <label>Search {brandA}
-          <input className="input" value={searchA}
-            onChange={e=>{setSearchA(e.target.value);setSelectedThread(null);setResults([]);}}
-            placeholder={`color name or code…`}/>
-        </label>
-
-        {/* Brand A results — pick one */}
-        {brandAThreads.length > 0 && !selectedThread && (
-          <div>
-            <div className="muted" style={{fontSize:12,marginBottom:8}}>{brandAThreads.length} results — tap to select:</div>
-            {brandAThreads.map(thread=>(
-              <div key={thread.id}
-                onClick={()=>setSelectedThread(thread)}
-                style={{
-                  display:"flex",alignItems:"center",gap:12,
-                  padding:"10px 12px",marginBottom:6,
-                  borderRadius:"var(--r-sm)",
-                  border:"1.5px solid var(--border-teal)",
-                  background:"var(--teal-pale)",
-                  cursor:"pointer",
-                  transition:"all 0.15s"
-                }}
-                onMouseEnter={e=>e.currentTarget.style.borderColor="var(--teal)"}
-                onMouseLeave={e=>e.currentTarget.style.borderColor="var(--border-teal)"}
-              >
-                {thread.hex_color && (
-                  <div style={{
-                    width:36,height:36,borderRadius:"50%",flexShrink:0,
-                    background:thread.hex_color,
-                    border:"2px solid rgba(255,255,255,0.6)",
-                    boxShadow:"0 2px 6px rgba(0,0,0,0.18),inset 0 1px 3px rgba(255,255,255,0.3)"
-                  }}/>
-                )}
-                <div style={{flex:1}}>
-                  <div style={{fontWeight:700,fontSize:13}}>{thread.color_code} — {thread.color_name}</div>
-                  <div className="muted" style={{fontSize:11}}>{thread.brand} · {thread.fiber_type||""} {thread.weight||""}</div>
-                </div>
-                <span style={{fontSize:11,color:"var(--teal)",fontWeight:700}}>Select →</span>
-              </div>
-            ))}
-          </div>
-        )}
-        {searchA.trim() && brandAThreads.length === 0 && (
-          <p className="muted" style={{fontSize:12}}>No {brandA} colors found for "{searchA}".</p>
-        )}
-      </div>
-
-      {/* Selected thread + matches */}
-      {selectedThread && (
-        <>
-          {/* Selected source thread */}
-          <div className="card" style={{borderColor:"var(--teal)",borderWidth:2}}>
-            <div style={{fontSize:11,fontWeight:700,color:"var(--teal)",marginBottom:8,textTransform:"uppercase",letterSpacing:"0.5px"}}>
-              Selected — {brandA}
-            </div>
-            <div style={{display:"flex",alignItems:"center",gap:12}}>
-              {selectedThread.hex_color && (
-                <div style={{
-                  width:52,height:52,borderRadius:"50%",flexShrink:0,
-                  background:selectedThread.hex_color,
-                  border:"3px solid rgba(255,255,255,0.7)",
-                  boxShadow:"0 3px 12px rgba(0,0,0,0.20),inset 0 2px 4px rgba(255,255,255,0.3)"
-                }}/>
-              )}
-              <div style={{flex:1}}>
-                <div style={{fontWeight:800,fontSize:16}}>{selectedThread.color_code} — {selectedThread.color_name}</div>
-                <div className="muted">{selectedThread.brand} · {selectedThread.fiber_type||""} {selectedThread.weight||""}</div>
-                <div className="muted" style={{fontSize:11}}>Color family: {hexToFamilyKey(selectedThread)}</div>
-              </div>
-              <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                <button className="btn active" style={{fontSize:11,padding:"5px 10px"}}
-                  onClick={()=>addToUserInventory(selectedThread)}>+ Stash</button>
-                <button className="btn" style={{fontSize:11,padding:"5px 10px"}}
-                  onClick={()=>{setSelectedThread(null);setResults([]);}}>✕ Clear</button>
-              </div>
-            </div>
-          </div>
-
-          {/* Nearest matches in brand B */}
-          <div className="card">
-            <div style={{
-              fontFamily:"'Playfair Display',serif",fontSize:14,fontWeight:700,
-              color:"var(--teal)",marginBottom:12
-            }}>
-              Nearest {brandB} matches
-            </div>
-
-            {results.length === 0 && (
-              <p className="muted">No {brandB} colors loaded — check that {brandB} data exists in the database.</p>
-            )}
-            {results.length === 1 && results[0]._noEquivalent && (
-              <p className="muted">No equivalent found in {brandB}.</p>
-            )}
-
-            {results.filter(m => !m._noEquivalent).map((match, i) => {
-              const isExact = i === 0;
-              return (
-                <div key={match.id} style={{
-                  display:"flex",alignItems:"center",gap:12,
-                  padding:"12px 14px",marginBottom:8,
-                  borderRadius:"var(--r-sm)",
-                  border:`1.5px solid ${isExact?"var(--teal)":"var(--border-teal)"}`,
-                  background: isExact ? "var(--teal-pale)" : "var(--warm-white)",
-                  boxShadow: isExact ? "var(--shadow-sm)" : "none"
-                }}>
-                  {/* Rank badge */}
-                  <div style={{
-                    width:22,height:22,borderRadius:"50%",flexShrink:0,
-                    background: isExact ? "var(--teal)" : "var(--border-teal)",
-                    color: isExact ? "var(--warm-white)" : "var(--muted)",
-                    fontSize:11,fontWeight:800,
-                    display:"flex",alignItems:"center",justifyContent:"center"
-                  }}>{i+1}</div>
-
-                  {/* Color swatch */}
-                  {match.hex_color && (
-                    <div style={{
-                      width:44,height:44,borderRadius:"50%",flexShrink:0,
-                      background:match.hex_color,
-                      border:"2px solid rgba(255,255,255,0.6)",
-                      boxShadow:"0 2px 8px rgba(0,0,0,0.18),inset 0 1px 3px rgba(255,255,255,0.3)"
-                    }}/>
-                  )}
-
-                  {/* Side-by-side comparison swatches */}
-                  <div style={{flexShrink:0}}>
-                    <div style={{fontSize:9,color:"var(--muted)",textAlign:"center",marginBottom:2}}>vs</div>
-                    <div style={{display:"flex",gap:2}}>
-                      <div style={{width:16,height:32,borderRadius:"4px 0 0 4px",background:selectedThread.hex_color||"#CCC"}}/>
-                      <div style={{width:16,height:32,borderRadius:"0 4px 4px 0",background:match.hex_color||"#CCC"}}/>
-                    </div>
-                  </div>
-
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontWeight:700,fontSize:13}}>
-                      {isExact && <span style={{fontSize:10,background:"var(--teal)",color:"white",borderRadius:4,padding:"1px 5px",marginRight:5}}>Best</span>}
-                      {match.color_code} — {match.color_name}
-                    </div>
-                    <div className="muted" style={{fontSize:11}}>{match.brand} · {match.fiber_type||""} {match.weight||""}</div>
-                    <div className="muted" style={{fontSize:11}}>Family: {hexToFamilyKey(match)}</div>
-                    {match._distance_pct!==undefined&&(
-                      <div style={{fontSize:10,color:"var(--teal)",fontWeight:700,marginTop:2}}>
-                        {match._distance_pct < 2 ? "🎯 Near-identical" :
-                         match._distance_pct < 8 ? "✓ Very close" :
-                         match._distance_pct < 15 ? "≈ Close" : "~ Similar"}
-                        {" "}({match._distance_pct.toFixed(1)}% difference)
-                      </div>
-                    )}
-                  </div>
-
-                  <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0}}>
-                    <button className="btn active" style={{fontSize:11,padding:"5px 10px"}}
-                      onClick={()=>addToUserInventory(match)}>+ Stash</button>
-                    <button className="btn" style={{fontSize:11,padding:"5px 10px"}}
-                      onClick={()=>addProjectRequiredThread(match)}>Project</button>
-                    <button className="btn" style={{fontSize:11,padding:"5px 10px"}}
-                      onClick={()=>addManualShoppingItem(match)}>+ List</button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
-
-      {!selectedThread && !searchA && (
-        <div className="card" style={{textAlign:"center",padding:"28px 20px"}}>
-          <div style={{fontSize:32,marginBottom:10}}>⇄</div>
-          <div style={{fontFamily:"'Playfair Display',serif",fontSize:15,fontWeight:700,color:"var(--teal)",marginBottom:6}}>
-            Cross-Reference Any Two Brands
-          </div>
-          <p className="muted" style={{fontSize:13}}>
-            Select a "From" brand and "To" brand above, then search for a color.
-            We'll find the top 5 closest color matches in the second brand.
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─────────────────────────────────────────────────────────────
 // USER PROFILE PAGE
 // ─────────────────────────────────────────────────────────────
@@ -3293,6 +3062,25 @@ function AuthScreen({ supabase, onGuest, onSignIn }) {
         </div>
       </div>
 
+      {/* Intro — what Haberdash Haven is */}
+      <div style={{maxWidth:400, width:"100%", textAlign:"center", marginBottom:22}}>
+        <p style={{fontFamily:"Nunito, sans-serif", fontSize:14.5, lineHeight:1.6, color:"#2A3D3D", margin:"0 0 14px"}}>
+          Your sewing room, in your pocket — the app that knows your supplies.{" "}
+          <strong style={{color:"#0D5252"}}>Match thread &amp; fabric colors</strong> in seconds, keep
+          your whole stash — threads, fabrics, machines, rulers, dies &amp; presser feet — at your
+          fingertips, plan projects, and build smart shopping lists so you never buy a duplicate spool again.
+        </p>
+        <div style={{display:"flex", flexWrap:"wrap", gap:8, justifyContent:"center"}}>
+          {["🎨 Color match","🧵 Stash tracking","📋 Projects","🛒 Shopping lists"].map(t=>(
+            <span key={t} style={{
+              fontSize:12, fontWeight:700, color:"#0D5252",
+              background:"rgba(255,255,255,0.72)", border:"1px solid #B8D8D8",
+              borderRadius:999, padding:"5px 12px"
+            }}>{t}</span>
+          ))}
+        </div>
+      </div>
+
       {/* Auth card */}
       <div style={{
         background:"white", borderRadius:20, padding:"28px 28px",
@@ -3594,7 +3382,7 @@ function AuthScreen({ supabase, onGuest, onSignIn }) {
 // ─────────────────────────────────────────────────────────────
 export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) {
   const userId = user?.id||null;
-  // Expose supabase on window so child components (CrossRefTab) can use precomputed table
+  // Expose supabase on window so child components can use precomputed tables
   if(supabase) window._supabaseClient = supabase;
 
   // ── User plan ─────────────────────────────────────────────
@@ -3619,6 +3407,9 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
   const isFree    = !isGuest && userPlan === "free";
   const isBasic   = !isGuest && userPlan === "basic";
   const isPremium = !isGuest && userPlan === "premium";
+  // Single source of truth for project limits — Free 1 · Basic 5 · Premium unlimited
+  const PROJECT_LIMITS = { free: 1, basic: 5, premium: Infinity };
+  const projectLimit = isPremium ? PROJECT_LIMITS.premium : isBasic ? PROJECT_LIMITS.basic : isFree ? PROJECT_LIMITS.free : 0;
   const canAccess = (minPlan) => {
     if(isGuest || !user) return false;
     if(minPlan === "free")    return true;
@@ -3633,13 +3424,21 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
   // ── State ─────────────────────────────────────────────────
   const [tab, setTab]                 = useState("home");
   const [showGame, setShowGame]       = useState(false);
+  const [showFieldGuide, setShowFieldGuide] = useState(false); // Quilter's Field Guide modal (Basic feature)
   const [subTab, setSubTab]           = useState("thread"); // match sub-tabs
+  const [harmonySeed, setHarmonySeed] = useState(null); // hex pushed to Color Wheel from a thread/match
   const [moreSubTab, setMoreSubTab]   = useState("machines");
   const [threads, setThreads]         = useState(starterThreads);
   const [supaAllThreads, setSupaAllThreads] = useState([]); // unified thread_library — all brands
   const [supaFabrics, setSupaFabrics] = useState([]); // fabric_library — all solids
+  const [machineCount, setMachineCount] = useState(null); // machine_library row count (for help text)
+  const [stashStats, setStashStats] = useState(null); // { threads, fabrics, projects } — for personalized Help
+  const [showInsuranceReport, setShowInsuranceReport] = useState(false); // Insurance Report modal (launched from Help or Settings)
   const [fabricStash, setFabricStash] = useState([]); // user_fabric_inventory rows (with joined fabric)
   const fabricBrandList = useMemo(()=>[...new Set(supaFabrics.map(f=>f.brand).filter(Boolean))].sort(),[supaFabrics]);
+  // Live counts for Help text — never hardcode
+  const threadBrandCount = useMemo(()=>new Set(supaAllThreads.map(t=>t.brand).filter(Boolean)).size,[supaAllThreads]);
+  const fabricBrandCount = fabricBrandList.length;
   const [fabricBrandFilter, setFabricBrandFilter] = useState("All");
   const [form, setForm]               = useState(emptyForm);
   const [message, setMessage]         = useState("");
@@ -3657,6 +3456,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
   const [colorFamilyKey, setColorFamilyKey]   = useState("All"); // ALWAYS an English key
   const [cameraImage, setCameraImage]         = useState(null);
   const [cameraSample, setCameraSample]       = useState(null);
+  const [manualHex, setManualHex]             = useState("#2a7f7f");
   const [pendingBarcode, setPendingBarcode]   = useState(null);
   const [showAddThread, setShowAddThread]     = useState(false);
   const [editQuickActions, setEditQuickActions] = useState(false);
@@ -3735,6 +3535,38 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
     loadFabrics();
   },[supabase]);
 
+  // Load machine_library count (head-only — for accurate Help text)
+  useEffect(()=>{
+    if(!supabase) return;
+    (async()=>{
+      const{count,error}=await supabase
+        .from("machine_library")
+        .select("*",{count:"exact",head:true});
+      if(!error&&typeof count==="number") setMachineCount(count);
+    })();
+  },[supabase]);
+
+  // Load the user's own stash stats for the personalized Help page.
+  // Runs when they open Help (and whenever sign-in / plan changes), using
+  // head-only count queries so it's cheap.
+  useEffect(()=>{
+    if(moreSubTab!=="help"||!supabase||!userId){ return; }
+    let cancelled=false;
+    (async()=>{
+      const [thr,fab] = await Promise.all([
+        supabase.from("user_inventory").select("*",{count:"exact",head:true}).eq("user_id",userId),
+        supabase.from("user_fabric_inventory").select("*",{count:"exact",head:true}).eq("user_id",userId),
+      ]);
+      if(cancelled) return;
+      setStashStats({
+        threads: thr?.count ?? 0,
+        fabrics: fab?.count ?? 0,
+        projects: projects?.length ?? 0,
+      });
+    })();
+    return ()=>{ cancelled=true; };
+  },[moreSubTab,supabase,userId,userPlan,projects?.length]);
+
   // Load fabric stash (user_fabric_inventory + joined fabric)
   const loadFabricStash=useCallback(async()=>{
     if(!supabase||!userId){ setFabricStash([]); return; }
@@ -3781,6 +3613,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
   const [rawNotifs, setRawNotifs] = useState([]); // rows from `notifications`
   const [dismissedIds, setDismissedIds] = useState([]); // session-only local hide
   const [showNotifs, setShowNotifs] = useState(false);
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
 
   const loadNotifications = useCallback(async()=>{
     if(!supabase||!userId||isGuest){ setRawNotifs([]); return; }
@@ -3984,13 +3817,13 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
     }));
     setMessage(`${brand} ${code} — ${name} added to "${projects.find(p=>p.id===selectedProjectId)?.name||"project"}"!`);
   };
-  const PROJECT_LIMIT = isPremium ? Infinity : isBasic ? 5 : 1; // Free 1 · Basic 5 · Premium unlimited
+  const PROJECT_LIMIT = projectLimit; // shared source of truth (Free 1 · Basic 5 · Premium unlimited)
   const createProject=()=>{
     if(!newProjectForm.name.trim()){setMessage("Please enter a project name.");return;}
     if(projects.length>=PROJECT_LIMIT){
       setMessage(isFree
-        ? "⚠ Free plan includes 1 project. Upgrade to Basic for 5, or Premium for unlimited."
-        : "⚠ Basic plan includes 5 projects. Upgrade to Premium for unlimited.");
+        ? `⚠ Free plan includes ${PROJECT_LIMITS.free} project${PROJECT_LIMITS.free===1?"":"s"}. Upgrade to Basic for ${PROJECT_LIMITS.basic}, or Premium for unlimited.`
+        : `⚠ Basic plan includes ${PROJECT_LIMITS.basic} projects. Upgrade to Premium for unlimited.`);
       return;
     }
     const id=`proj-${Date.now()}`;
@@ -4097,40 +3930,35 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
     const label = `${thread.brand||"Thread"} ${thread.color_code||thread.code||""} — ${thread.color_name||thread.name||""}`.trim();
     try{
       if(supabase&&userId&&thread.id){
-        // Enforce free plan thread limit (25)
+        // Enforce free plan thread limit
         if(userPlan === "free"){
           const {count} = await supabase.from("user_inventory").select("*",{count:"exact",head:true}).eq("user_id",userId);
-          if(count >= 25){
-            setMessage("⚠ Free plan limit: 25 threads. Upgrade to Basic for unlimited stash.");
+          if(count >= FREE_THREAD_LIMIT){
+            setMessage(`⚠ Free plan limit: ${FREE_THREAD_LIMIT} threads. Upgrade to Basic for unlimited stash.`);
             return;
           }
         }
-        // Store directly in user_inventory using thread_library_all id
-        // Single thread_library table — thread.id is always the FK
         const{error}=await supabase.from("user_inventory")
           .upsert({user_id:userId,thread_id:thread.id,spool_count:1,inventory_target:settings.defaultInventoryTarget||0},{onConflict:"user_id,thread_id"});
         if(error){
-          console.error("user_inventory upsert error:",error.message);
+          console.error("user_inventory upsert error:",error);
+          setMessage(`⚠ Couldn't save to stash: ${error.message}`);
           saveThreadToLocalStash(thread);
-          setMessage(`${label} saved locally.`);
-          return;
-        }
-        if(error){
-          console.error("user_inventory upsert error:",error.message);
-          // If FK fails (thread_id not in thread_library), save to local stash instead
-          saveThreadToLocalStash(thread);
-          setMessage(`${label} saved to local stash.`);
           return;
         }
         setMessage(`${label} added to your stash!`);
         return;
       }
+      if(supabase&&userId&&!thread.id){
+        setMessage(`⚠ ${label} has no library id — saved locally instead.`);
+      }
     }catch(e){
       console.error("addToUserInventory error:",e);
+      setMessage(`⚠ ${e.message||"Error adding to stash"}`);
     }
-    // Offline / no supabase — save locally
+    // Offline / no supabase / no id — save locally
     saveThreadToLocalStash(thread);
-    setMessage(`${label} saved to local stash.`);
+    if(!(supabase&&userId)) setMessage(`${label} saved to local stash.`);
   };
 
   const saveThreadToLocalStash=thread=>{
@@ -4322,6 +4150,12 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
           <div><b>Color family:</b> {hexToFamilyKey(fabric)}</div>
           {fabric.nearest_kona_name&&<div><b>Nearest Kona:</b> {fabric.nearest_kona_name}</div>}
         </div>
+        <button
+          onClick={()=>{ setHarmonySeed({hex,t:Date.now()}); setSubTab("colorwheel"); }}
+          style={{marginTop:8,width:"100%",padding:"8px 12px",borderRadius:"var(--r-sm)",
+            border:"1.5px solid var(--teal)",background:"var(--teal-pale)",color:"var(--teal)",
+            fontWeight:700,fontSize:13,cursor:"pointer"}}
+        >🎨 Use this color in Color Harmony</button>
 
         {/* Cross-ref 1: nearest matching thread */}
         {nearestThread&&(
@@ -4417,6 +4251,12 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
             <div><b>Color family:</b> {hexToFamilyKey(thread)}</div>
           </div>
         )}
+        <button
+          onClick={()=>{ setHarmonySeed({hex,t:Date.now()}); setSubTab("colorwheel"); }}
+          style={{marginTop:8,width:"100%",padding:"8px 12px",borderRadius:"var(--r-sm)",
+            border:"1.5px solid var(--teal)",background:"var(--teal-pale)",color:"var(--teal)",
+            fontWeight:700,fontSize:13,cursor:"pointer"}}
+        >🎨 Use this color in Color Harmony</button>
         {!isAllBrandsRow&&!isSupaThread&&(
           <div className="list-box">
             {settings.showBarcodes&&thread.barcode&&<div><b>Barcode:</b> {thread.barcode}</div>}
@@ -4556,11 +4396,14 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
           </div>
         </div>
 
-        {/* Notification bell — signed-in users only */}
+        {/* Notification bell button — signed-in users only. The dropdown panel
+            is rendered OUTSIDE the header (below), because .card:hover applies a
+            CSS transform to this header, and a transformed ancestor re-anchors
+            position:fixed children — which made the panel chase the cursor. */}
         {user && !isGuest && (
           <div style={{position:"absolute",top:12,right:12,zIndex:20}}>
             <button
-              onClick={()=>{ setShowNotifs(v=>!v); if(!showNotifs) markAllRead(); }}
+              onClick={()=>{ setShowNotifs(v=>!v); if(!showNotifs) markAllRead(); setShowAccountMenu(false); }}
               aria-label="Notifications"
               style={{
                 position:"relative",background:"rgba(255,255,255,0.12)",border:"none",
@@ -4577,55 +4420,110 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
                 }}>{unreadCount>9?"9+":unreadCount}</span>
               )}
             </button>
+          </div>
+        )}
 
-            {showNotifs && (
-              <div style={{
-                position:"fixed",top:64,right:12,width:300,maxWidth:"86vw",zIndex:1000,
-                background:"var(--warm-white)",border:"1.5px solid var(--border-teal)",
-                borderRadius:"var(--r-md)",boxShadow:"0 8px 28px rgba(0,0,0,0.22)",
-                overflow:"hidden",textAlign:"left"
+        {/* Account gear — signed-in users only. Holds Profile / Settings / Help.
+            Dropdown is rendered OUTSIDE the header (below) for the same
+            transform-anchoring reason as the notification panel. */}
+        {user && !isGuest && (
+          <div style={{position:"absolute",top:12,right:58,zIndex:20}}>
+            <button
+              onClick={()=>{ setShowAccountMenu(v=>!v); setShowNotifs(false); }}
+              aria-label="Account menu"
+              style={{
+                background:"rgba(255,255,255,0.12)",border:"none",
+                borderRadius:"50%",width:38,height:38,cursor:"pointer",fontSize:18,
+                display:"flex",alignItems:"center",justifyContent:"center",color:"#fff"
               }}>
-                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
-                  padding:"10px 14px",borderBottom:"1px solid var(--border-teal)",background:"var(--teal-pale)"}}>
-                  <span style={{fontWeight:800,fontSize:13,color:"var(--teal)"}}>Notifications</span>
-                  <span style={{fontSize:16,cursor:"pointer",color:"var(--muted)"}} onClick={()=>setShowNotifs(false)}>✕</span>
-                </div>
-
-                {visibleNotifs.length===0 ? (
-                  <div style={{padding:"22px 16px",textAlign:"center"}}>
-                    <div style={{fontSize:26,marginBottom:6}}>✨</div>
-                    <p className="muted" style={{fontSize:13,margin:0}}>You're all caught up.</p>
-                  </div>
-                ) : (
-                  <div style={{maxHeight:320,overflowY:"auto"}}>
-                    {visibleNotifs.map(n=>(
-                      <div key={n.id} style={{display:"flex",gap:10,padding:"11px 14px",
-                        borderBottom:"1px solid var(--teal-pale)",alignItems:"flex-start"}}>
-                        <div style={{fontSize:18,flexShrink:0,lineHeight:1.2}}>{n.icon}</div>
-                        <div style={{flex:1,minWidth:0,cursor:"pointer"}}
-                          onClick={()=>{ if(n.dest_tab){ setTab(n.dest_tab); if(n.dest_sub) setMoreSubTab(n.dest_sub); } setShowNotifs(false); }}>
-                          <div style={{fontWeight:700,fontSize:13,color:"var(--ink)"}}>{n.title}</div>
-                          {n.body&&<div style={{fontSize:12,color:"var(--muted)",marginTop:1}}>{n.body}</div>}
-                        </div>
-                        <span title="Dismiss" style={{fontSize:13,cursor:"pointer",color:"var(--subtle)",flexShrink:0}}
-                          onClick={()=>dismissNotif(n.id)}>✕</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+              ⚙
+            </button>
           </div>
         )}
 
         <div className="hero-bar" style={{pointerEvents:"none"}}></div>
       </header>
 
+      {/* ── Notification dropdown — rendered at app-shell level, OUTSIDE the
+          .card header, so no ancestor transform can re-anchor it. ── */}
+      {user && !isGuest && showNotifs && (
+        <>
+          {/* Backdrop — tap anywhere to close. */}
+          <div
+            onClick={()=>setShowNotifs(false)}
+            style={{position:"fixed",inset:0,zIndex:999,background:"rgba(0,0,0,0.15)"}}
+          />
+          <div style={{
+            position:"fixed",top:64,right:12,width:300,maxWidth:"86vw",zIndex:1000,
+            background:"var(--warm-white)",border:"1.5px solid var(--border-teal)",
+            borderRadius:"var(--r-md)",boxShadow:"0 8px 28px rgba(0,0,0,0.22)",
+            overflow:"hidden",textAlign:"left"
+          }}
+            onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+              padding:"10px 14px",borderBottom:"1px solid var(--border-teal)",background:"var(--teal-pale)"}}>
+              <span style={{fontWeight:800,fontSize:13,color:"var(--teal)"}}>Notifications</span>
+              <span style={{fontSize:16,cursor:"pointer",color:"var(--muted)"}} onClick={()=>setShowNotifs(false)}>✕</span>
+            </div>
+
+            {visibleNotifs.length===0 ? (
+              <div style={{padding:"22px 16px",textAlign:"center"}}>
+                <div style={{fontSize:26,marginBottom:6}}>✨</div>
+                <p className="muted" style={{fontSize:13,margin:0}}>You're all caught up.</p>
+              </div>
+            ) : (
+              <div style={{maxHeight:320,overflowY:"auto"}}>
+                {visibleNotifs.map(n=>(
+                  <div key={n.id} style={{display:"flex",gap:10,padding:"11px 14px",
+                    borderBottom:"1px solid var(--teal-pale)",alignItems:"flex-start"}}>
+                    <div style={{fontSize:18,flexShrink:0,lineHeight:1.2}}>{n.icon}</div>
+                    <div style={{flex:1,minWidth:0,cursor:"pointer"}}
+                      onClick={()=>{ if(n.dest_tab){ setTab(n.dest_tab); if(n.dest_sub) setMoreSubTab(n.dest_sub); } setShowNotifs(false); }}>
+                      <div style={{fontWeight:700,fontSize:13,color:"var(--ink)"}}>{n.title}</div>
+                      {n.body&&<div style={{fontSize:12,color:"var(--muted)",marginTop:1}}>{n.body}</div>}
+                    </div>
+                    <span title="Dismiss" style={{fontSize:13,cursor:"pointer",color:"var(--subtle)",flexShrink:0}}
+                      onClick={()=>dismissNotif(n.id)}>✕</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ── Account menu dropdown — rendered at app-shell level, outside the
+          transformed header (same reason as the notification panel). ── */}
+      {user && !isGuest && showAccountMenu && (
+        <>
+          <div
+            onClick={()=>setShowAccountMenu(false)}
+            style={{position:"fixed",inset:0,zIndex:999,background:"rgba(0,0,0,0.15)"}}
+          />
+          <div style={{
+            position:"fixed",top:64,right:12,width:210,maxWidth:"86vw",zIndex:1000,
+            background:"var(--warm-white)",border:"1.5px solid var(--border-teal)",
+            borderRadius:"var(--r-md)",boxShadow:"0 8px 28px rgba(0,0,0,0.22)",
+            overflow:"hidden",textAlign:"left"
+          }}
+            onClick={e=>e.stopPropagation()}>
+            {[["profile","👤 Profile"],["settings","⚙ Settings"],["help","❓ Help"]].map(([key,label])=>(
+              <div key={key}
+                onClick={()=>{ setTab("more"); setMoreSubTab(key); setShowAccountMenu(false); }}
+                style={{padding:"12px 16px",cursor:"pointer",fontWeight:700,fontSize:14,
+                  color:"var(--teal)",borderBottom:"1px solid var(--teal-pale)"}}>
+                {label}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
       {/* ── 4-tab main nav ── */}
       <nav className="nav-row main-nav" style={{position:"relative",zIndex:1}}>
         {mainTabs.map(([key,label])=>(
           <button key={key} className={`btn ${tab===key?"active":""}`}
-            onClick={()=>setTab(key)}
+            onClick={()=>{ setTab(key); if(key==="more"&&["profile","settings","help"].includes(moreSubTab)) setMoreSubTab("machines"); }}
             style={{flex:1,textAlign:"center"}}>
             {label}
           </button>
@@ -4662,6 +4560,25 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
               <div style={{fontSize:12,color:"var(--muted)"}}>Rescue your quilt before the Bee deadline. A quick coffee-break game.</div>
             </div>
             <button className="btn active" style={{flexShrink:0,fontWeight:700}} onClick={()=>setShowGame(true)}>Play</button>
+          </div>
+
+          {/* Quilter's Field Guide — bilingual reference, Basic feature */}
+          <div className="card" style={{background:"linear-gradient(135deg,var(--teal-pale),var(--linen))",border:"1.5px solid var(--border-teal)",display:"flex",alignItems:"center",gap:14}}>
+            <div style={{fontSize:34,flexShrink:0}}>📘</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:800,color:"var(--teal)"}}>Quilter&rsquo;s Field Guide</div>
+              <div style={{fontSize:12,color:"var(--muted)"}}>
+                {canAccess("basic")
+                  ? "Know your needles, threads, fabrics, batting & tools — plus how to price and sell your quilts. English & Español."
+                  : "A bilingual guide to your tools, materials, and selling your quilts."}
+              </div>
+            </div>
+            {canAccess("basic") ? (
+              <button className="btn active" style={{flexShrink:0,fontWeight:700}} onClick={()=>setShowFieldGuide(true)}>Open</button>
+            ) : (
+              <button className="btn" style={{flexShrink:0,fontWeight:700}} title="Basic feature"
+                onClick={()=>window.location.href=window.location.origin}>🔒 Basic</button>
+            )}
           </div>
 
           <div className="card">
@@ -4781,7 +4698,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
         <>
           {/* Sub-tab row */}
           <div className="sub-tab-row">
-            {[["thread","🔍 Thread"],["crossref","⇄ Cross-Ref"],["colorwheel","🎨 Color Wheel"],["camera","📷 Camera"],["fabric","◈ Fabric"],["barcode","▦ Barcode"]].map(([key,label])=>(
+            {[["thread","🔍 Thread"],["colorwheel","🎨 Color Wheel"],["camera","📷 Camera"],["fabric","◈ Fabric"]].map(([key,label])=>(
               <button key={key} className={`sub-tab ${subTab===key?"active":""}`} onClick={()=>setSubTab(key)}>
                 {label}
               </button>
@@ -4795,7 +4712,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
                 <h2>Thread Match</h2>
                 <label>Thread Brand
                   {!user&&<span style={{fontSize:11,color:"var(--sky-cobalt)",marginLeft:6,fontWeight:600}}>
-                    (Sign in to access all 26 brands)
+                    (Sign in to access all {threadBrands.length} brands)
                   </span>}
                   <select className="input" value={matchBrand} onChange={e=>setMatchBrand(e.target.value)}
                     disabled={!user||isGuest}>
@@ -4848,12 +4765,12 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
                     Showing 10 of {supaAllThreads.filter(t=>t.brand_key==="isacord").length}+ Isacord colors
                   </div>
                   <p style={{fontSize:12,opacity:0.9,marginBottom:10}}>
-                    Sign in to search all {supaAllThreads.length.toLocaleString()} thread colors across 26 brands, use cross-referencing, and save your stash.
+                    Sign in to search all {supaAllThreads.length.toLocaleString()} thread colors across {threadBrands.length} brands, use cross-referencing, and save your stash.
                   </p>
                   <button className="btn"
                     style={{background:"var(--sun-gold)",color:"var(--teal)",border:"none",fontWeight:800,padding:"8px 20px"}}
                     onClick={()=>{ if(supabase) { window.location.href=window.location.origin; } }}>
-                    Sign In / Create Account
+                    {t("stash_signin",lang)}
                   </button>
                 </div>
               )}
@@ -4901,24 +4818,6 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
             </>
           )}
 
-          {/* ── Cross-Reference tab ── */}
-          {subTab==="crossref"&&(
-            (!user||isGuest||!canAccess("basic")) ? (
-              <UpgradePrompt requiredPlan="basic" feature="Cross-Reference" currentPlan={userPlan} isGuest={isGuest||!user}/>
-            ) : (
-            <CrossRefTab
-              supaAllThreads={supaAllThreads}
-              threadBrands={threadBrands}
-              brandKeyMap={brandKeyMap}
-              addToUserInventory={addToUserInventory}
-              addProjectRequiredThread={addProjectRequiredThread}
-              addManualShoppingItem={addManualShoppingItem}
-              hexToFamilyKey={hexToFamilyKey}
-              settings={settings}
-            />
-            )
-          )}
-
           {/* Color Wheel */}
           {subTab==="colorwheel"&&(
             (!user||isGuest) ? (
@@ -4927,6 +4826,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
             <ColorWheelTab
               supaAllThreads={supaAllThreads}
               supaFabrics={supaFabrics}
+              seedHex={harmonySeed}
               userId={userId}
               supabase={supabase}
               addToUserInventory={addToUserInventory}
@@ -4948,6 +4848,15 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
                   <p className="muted">Take a photo of the thread. Once matched, the barcode is saved for everyone.</p>
                 </div>
               )}
+              <div className="card">
+                <h2>Enter a Color</h2>
+                <div style={{fontSize:12,color:"var(--muted)",marginBottom:8}}>Type a hex code or drag the R/G/B sliders, then match.</div>
+                <ColorPicker value={manualHex} onChange={setManualHex}/>
+                <button className="btn active" style={{marginTop:10,width:"100%"}} onClick={()=>{
+                  const rgb=hexToRgb(manualHex); if(!rgb)return;
+                  setCameraSample({hex:manualHex,r:rgb.r,g:rgb.g,b:rgb.b});
+                }}>🎯 Match this color</button>
+              </div>
               <div className="card">
                 <h2>Camera Color Match</h2>
                 <input className="input" type="file" accept="image/*" capture="environment" onChange={handleCameraImageUpload}/>
@@ -5015,21 +4924,6 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
           )}
 
           {/* Barcode scan */}
-          {subTab==="barcode"&&(
-            !canAccess("basic") ? (
-              <UpgradePrompt requiredPlan="basic" feature="Barcode Scanner" currentPlan={userPlan} isGuest={isGuest||!user}/>
-            ) : (
-            <div style={{padding:"8px 0"}}>
-              {supabase
-                ?<BarcodeScanner supabase={supabase} userId={userId}
-                    onAddToStash={thread=>setMessage(`${thread.color_name} added to your stash!`)}
-                    onColorMatch={barcode=>{setPendingBarcode(barcode);setSubTab("camera");}}
-                  />
-                :<div className="card"><p className="muted">Connect to Supabase to use barcode scanning.</p></div>
-              }
-            </div>
-            )
-          )}
         </>
       )}
 
@@ -5041,10 +4935,10 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
           <div className="card" style={{textAlign:"center",padding:"32px 20px"}}>
             <div style={{fontSize:32,marginBottom:10}}>◈</div>
             <div style={{fontFamily:"Playfair Display,serif",fontSize:16,fontWeight:700,color:"var(--teal)",marginBottom:8}}>
-              Your Stash Requires an Account
+              {t("stash_acct_title",lang)}
             </div>
             <p className="muted" style={{fontSize:13,marginBottom:16}}>
-              Sign in to track your threads, machines, rulers, presser feet, and accessories.
+              {t("stash_acct_body",lang)}
             </p>
             <button className="btn active" onClick={()=>{ if(supabase) { window.location.href=window.location.origin; } }}>
               Sign In / Create Account
@@ -5069,6 +4963,8 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
             settings={settings}
             userSettings={settings}
             userPlan={userPlan}
+            lang={lang}
+            onUseInHarmony={hex=>{ setHarmonySeed({hex,t:Date.now()}); setSubTab("colorwheel"); setTab("match"); }}
           />
         </>
         )
@@ -5084,7 +4980,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
           user={user}
           isGuest={isGuest}
           userPlan={userPlan}
-          projectLimit={isPremium ? Infinity : isBasic ? 10 : isFree ? 2 : 0}
+          projectLimit={projectLimit}
           selectedProjectId={selectedProjectId}
           setSelectedProjectId={setSelectedProjectId}
           addProjectRequiredThread={addProjectRequiredThread}
@@ -5099,12 +4995,14 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
           ══════════════════════════════════════════════════════ */}
       {tab==="more"&&(
         <>
-          {/* More sub-nav */}
-          <div className="sub-tab-row">
-            {[["machines","⚙️ Machines"],["accuquilt","◈ AccuQuilt"],["feet","👟 Feet"],["rulers","📐 Rulers"],["forum","💬 Forum"],["help","? Help"],["profile","👤 Profile"],["settings","⚙ Settings"]].map(([key,label])=>(
-              <button key={key} className={`sub-tab ${moreSubTab===key?"active":""}`} onClick={()=>setMoreSubTab(key)}>{label}</button>
-            ))}
-          </div>
+          {/* More sub-nav — browse items only. Profile/Settings/Help moved to the header gear menu. */}
+          {!["profile","settings","help"].includes(moreSubTab) && (
+            <div className="sub-tab-row">
+              {[["machines","⚙️ Machines"],["accuquilt","◈ AccuQuilt"],["feet","👟 Feet"],["rulers","📐 Rulers"],["tools","🧮 Tools"],["forum","💬 Forum"]].map(([key,label])=>(
+                <button key={key} className={`sub-tab ${moreSubTab===key?"active":""}`} onClick={()=>setMoreSubTab(key)}>{label}</button>
+              ))}
+            </div>
+          )}
 
           {moreSubTab==="machines"&&(
             (!user||isGuest||!canAccess("basic"))
@@ -5114,6 +5012,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
           {moreSubTab==="accuquilt"&&(supabase?<AccuQuiltBrowser supabase={supabase} userId={userId}/>:<div className="card"><p className="muted">Connect to Supabase to browse AccuQuilt.</p></div>)}
           {moreSubTab==="feet"&&(supabase?<FeetBrowser supabase={supabase} userId={userId}/>:<div className="card"><p className="muted">Connect to Supabase to browse presser feet.</p></div>)}
           {moreSubTab==="rulers"&&(supabase?<RulerBrowser supabase={supabase} userId={userId}/>:<div className="card"><p className="muted">Connect to Supabase to browse rulers.</p></div>)}
+          {moreSubTab==="tools"&&<ToolsTab/>}
           {moreSubTab==="forum"&&(
             !supabase
               ?<div className="card"><p className="muted">Connect to Supabase to access the forum.</p></div>
@@ -5125,18 +5024,62 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
           {moreSubTab==="help"&&(
             <div className="card">
               <h2>Help &amp; Guide</h2>
+              {(()=>{
+                const firstName = user?.user_metadata?.first_name
+                  || (user?.user_metadata?.display_name||"").trim().split(" ")[0]
+                  || "";
+                const planLabel = isPremium ? "Premium" : isBasic ? "Basic" : isFree ? "Free" : "Guest";
+                const planColor = isPremium ? "var(--sun-amber)" : isBasic ? "var(--teal)" : "var(--muted)";
+                const greeting = firstName ? `Hi ${firstName}!` : (user&&!isGuest ? "Welcome back!" : "Welcome!");
+                const projCount = stashStats?stashStats.projects:projects.length;
+                return (
+                  <div style={{background:"var(--teal-pale)",border:"1.5px solid var(--border-teal)",borderRadius:"var(--r-sm)",padding:"12px 14px",marginBottom:14}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                      <span style={{fontFamily:"Playfair Display,serif",fontSize:18,fontWeight:700,color:"var(--ink)"}}>{greeting}</span>
+                      <span style={{fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:".5px",color:"#fff",background:planColor,borderRadius:999,padding:"2px 10px"}}>{planLabel} plan</span>
+                    </div>
+                    {/* Stash stats — only for signed-in users */}
+                    {(user&&!isGuest)&&(
+                      <div style={{display:"flex",gap:14,flexWrap:"wrap",marginTop:10,fontSize:13,color:"var(--ink)"}}>
+                        <span><b>{stashStats?stashStats.threads:"—"}</b> threads{isFree?<span className="muted"> / {FREE_THREAD_LIMIT}</span>:""}</span>
+                        <span><b>{stashStats?stashStats.fabrics:"—"}</b> fabrics</span>
+                        <span><b>{projCount}</b> project{projCount===1?"":"s"}{projectLimit!==Infinity?<span className="muted"> / {projectLimit}</span>:""}</span>
+                      </div>
+                    )}
+                    {/* Plan-aware nudge */}
+                    {isFree&&(
+                      <p style={{fontSize:12,color:"var(--muted)",margin:"10px 0 0"}}>
+                        You're on Free — threads, the match engine, and 1 project are yours. <b style={{color:"var(--teal)"}}>Basic</b> unlocks the machine library, camera match, barcode scanner, and 5 projects; <b style={{color:"var(--sun-amber)"}}>Premium</b> adds fabric stash, the forum, insurance reports, and unlimited projects.
+                      </p>
+                    )}
+                    {isBasic&&(
+                      <p style={{fontSize:12,color:"var(--muted)",margin:"10px 0 0"}}>
+                        You've got the full match toolkit. <b style={{color:"var(--sun-amber)"}}>Premium</b> adds fabric stash, the community forum, insurance reports, and unlimited projects whenever you're ready.
+                      </p>
+                    )}
+                    {isPremium&&(
+                      <p style={{fontSize:12,color:"var(--muted)",margin:"10px 0 0"}}>
+                        You've got everything Haberdash Haven offers — every feature below is yours. Happy stitching.
+                      </p>
+                    )}
+                    {(!user||isGuest)&&(
+                      <p style={{fontSize:12,color:"var(--muted)",margin:"10px 0 0"}}>
+                        You're browsing as a guest. Sign in (free) to save your stash, track projects, and use the match engine across every brand.
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
               <p className="muted" style={{fontSize:13,marginTop:-4,marginBottom:14}}>
                 Everything Haberdash Haven can do, tab by tab. Tap any feature in the app to try it as you read.
               </p>
 
               {/* MATCH */}
               <div style={{fontSize:12,fontWeight:800,color:"var(--sun-amber)",textTransform:"uppercase",letterSpacing:".6px",margin:"4px 0 8px"}}>Match</div>
-              <p><b>🔍 Thread:</b> Pick a brand, choose a color family, or type to search across every thread color in the library. Each result shows the color details, the closest equivalent in any other thread brand, and now the <b>closest fabrics</b> too — plus + Add to Stash, Add to Project, and Shopping List.</p>
-              <p style={{marginTop:8}}><b>⇄ Cross-Ref:</b> Convert a color between any two thread brands. Pick a source brand and color, pick the brand you want the equivalent in, and get the nearest match by color distance.</p>
+              <p><b>🔍 Thread:</b> Pick a brand, choose a color family, or type to search across {supaAllThreads.length>0?<>all {supaAllThreads.length.toLocaleString()} thread colors{threadBrandCount>0?` from ${threadBrandCount} brands`:""}</>:"every thread color"} in the library. Each result shows the color details, the closest equivalent in any other thread brand, and the <b>closest fabrics</b> too — plus + Add to Stash, Add to Project, and Shopping List.</p>
               <p style={{marginTop:8}}><b>🎨 Color Wheel:</b> Explore color harmonies — complementary, analogous, triadic, split-complementary, tetradic, and monochromatic. Each color in the palette matches to real threads and fabrics you can add straight to your stash or project.</p>
               <p style={{marginTop:8}}><b>📷 Camera:</b> Snap a photo of a fabric or thread, tap any color in the image, and get the closest matches. Works on prints and solids — it averages a small area around your tap for accuracy.</p>
-              <p style={{marginTop:8}}><b>◈ Fabric:</b> Search solid fabrics by brand or color. Each fabric card shows its nearest matching thread and the closest equivalent in another fabric brand. <span className="muted">(Fabric stash is a Premium feature.)</span></p>
-              <p style={{marginTop:8}}><b>▦ Barcode:</b> Scan any thread spool. A known barcode adds it to your stash instantly; an unknown one lets you identify it by camera, then saves that barcode for everyone.</p>
+              <p style={{marginTop:8}}><b>◈ Fabric:</b> Search {supaFabrics.length>0?<>{supaFabrics.length.toLocaleString()} solid fabrics{fabricBrandCount>0?` across ${fabricBrandCount} brands`:""}</>:"solid fabrics"} by brand or color. Each fabric card shows its nearest matching thread and the closest equivalent in another fabric brand. <span className="muted">(Fabric stash is a Premium feature.)</span></p>
 
               {/* STASH */}
               <div style={{fontSize:12,fontWeight:800,color:"var(--sun-amber)",textTransform:"uppercase",letterSpacing:".6px",margin:"16px 0 8px"}}>Stash &amp; Shopping</div>
@@ -5145,13 +5088,27 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
 
               {/* PROJECTS */}
               <div style={{fontSize:12,fontWeight:800,color:"var(--sun-amber)",textTransform:"uppercase",letterSpacing:".6px",margin:"16px 0 8px"}}>Projects</div>
-              <p><b>Projects:</b> Create a project, build its required thread and fabric lists, track status, and keep a journal and notes as you stitch. <span className="muted">(Free includes 1 project · Basic includes 5 · Premium is unlimited.)</span></p>
+              <p><b>Projects:</b> Create a project, build its required thread and fabric lists, track status, and keep a journal and notes as you stitch. <span className="muted">(Free includes {PROJECT_LIMITS.free} project{PROJECT_LIMITS.free===1?"":"s"} · Basic includes {PROJECT_LIMITS.basic} · Premium is unlimited.)</span></p>
 
               {/* MORE */}
               <div style={{fontSize:12,fontWeight:800,color:"var(--sun-amber)",textTransform:"uppercase",letterSpacing:".6px",margin:"16px 0 8px"}}>More</div>
-              <p><b>Machine Library:</b> Browse the full reference library of 77 machines and tap + Add to track what you own; attach photos too. <span className="muted">(Basic feature.)</span></p>
+              <p><b>Machine Library:</b> Browse the {machineCount?`full reference library of ${machineCount.toLocaleString()} machines`:"full machine reference library"} and tap + Add to track what you own; attach photos too. <span className="muted">(Basic feature.)</span></p>
               <p style={{marginTop:8}}><b>AccuQuilt / Feet / Rulers:</b> Browse the libraries and add items to your stash. <span className="muted">(Premium stash.)</span></p>
               <p style={{marginTop:8}}><b>Insurance Report:</b> Generate a printable report of your stash for insurance purposes, with optional purchase price and estimated value. <span className="muted">(Premium feature.)</span></p>
+              {isPremium ? (
+                <button
+                  onClick={()=>setShowInsuranceReport(true)}
+                  style={{marginTop:6,padding:"6px 14px",borderRadius:"var(--r-full)",border:"1.5px solid var(--teal)",background:"var(--teal-pale)",color:"var(--teal)",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"Nunito, sans-serif"}}>
+                  📋 Open Insurance Report
+                </button>
+              ) : (
+                <button
+                  disabled
+                  title="Premium feature"
+                  style={{marginTop:6,padding:"6px 14px",borderRadius:"var(--r-full)",border:"1.5px solid var(--border-teal)",background:"var(--linen)",color:"var(--muted)",fontSize:12,fontWeight:800,cursor:"not-allowed",opacity:0.6,fontFamily:"Nunito, sans-serif"}}>
+                  📋 Open Insurance Report 🔒
+                </button>
+              )}
               <p style={{marginTop:8}}><b>Community Forum:</b> Share tips, ask questions, and post project reviews with other stitchers. <span className="muted">(Premium feature.)</span></p>
               <p style={{marginTop:8}}><b>Settings:</b> Set your default brand and preferred cross-reference brand, default inventory target, language, and barcode/weight display. CSV export of your full stash lives here too. <span className="muted">(CSV export is a Premium feature.)</span></p>
 
@@ -5163,6 +5120,16 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
                 Beta build {APP_VERSION} — thanks for testing! Spot a bug or have an idea? Let us know.
               </p>
             </div>
+          )}
+
+          {/* Insurance Report — launched from Help or Settings (premium only) */}
+          {showInsuranceReport && isPremium && (
+            <InsuranceReportBuilder
+              onClose={()=>setShowInsuranceReport(false)}
+              userId={userId}
+              supabase={supabase}
+              showValuesEnabled={settings?.showValuesInReports??false}
+            />
           )}
 
           {moreSubTab==="profile"&&(
@@ -5229,6 +5196,20 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
                   Enables purchase price &amp; estimated value fields on insurance printouts.
                 </span>
               </label>
+              {isPremium ? (
+                <button
+                  onClick={()=>setShowInsuranceReport(true)}
+                  style={{margin:"2px 0 6px",padding:"6px 14px",borderRadius:"var(--r-full)",border:"1.5px solid var(--teal)",background:"var(--teal-pale)",color:"var(--teal)",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"Nunito, sans-serif"}}>
+                  📋 Open Insurance Report
+                </button>
+              ) : (
+                <button
+                  disabled
+                  title="Premium feature"
+                  style={{margin:"2px 0 6px",padding:"6px 14px",borderRadius:"var(--r-full)",border:"1.5px solid var(--border-teal)",background:"var(--linen)",color:"var(--muted)",fontSize:12,fontWeight:800,cursor:"not-allowed",opacity:0.6,fontFamily:"Nunito, sans-serif"}}>
+                  📋 Open Insurance Report 🔒
+                </button>
+              )}
               <label>Default Inventory Target
                 <input type="number" min="0" className="input" style={{maxWidth:120}}
                   value={settings.defaultInventoryTarget??0}
@@ -5296,6 +5277,7 @@ export default function App({ supabase, user, isGuest, onGuestMode, onSignIn }) 
       )}
 
       {showGame && <SpoolQuest onClose={()=>setShowGame(false)} />}
+      {showFieldGuide && canAccess("basic") && <FieldGuide supabase={supabase} lang={lang} onClose={()=>setShowFieldGuide(false)} />}
     </div>
   );
 }
